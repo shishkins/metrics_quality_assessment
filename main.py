@@ -34,12 +34,15 @@ class data_lake():
         self.errors_df = self.errors_df.merge(products_reference_df, on='product_id', how='left')
         self.errors_df = self.errors_df.merge(pricing_types_df, on='algorithm', how='left')
         self.errors_df = self.errors_df.merge(write_date_df, how='cross')
+
+        ''' FILTERS '''
         self.picked_data = pd.DataFrame(
             {
                 'start_date': [reprices_log_df['date'].min()],
                 'end_date': [reprices_log_df['date'].max()]
             })
         self.picked_algorithms = pricing_types_df
+        ''' FILTERS '''
 
     def filters_date(self, start_date=None, end_date=None):
         '''

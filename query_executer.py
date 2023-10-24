@@ -38,78 +38,71 @@ def csv_execute(period='month', how_long='3', rewrite=True):
     pg_conn = get_fspb_pg_conn()
     ch_conn = get_fspb_ch_conn()
 
-    if not os.path.isdir("../../projects_repositories/metrics_quality_assessment/csv"):  # создание папки с csv файлами
-        os.mkdir("../../projects_repositories/metrics_quality_assessment/csv")
-    os.chdir('../../projects_repositories/metrics_quality_assessment/csv')  # изменяем текущую директорую на папку с csv
+    if not os.path.isdir("csv"):
+        os.mkdir("csv") # создание папки с csv файлами, если таковой не имеется
+    os.chdir('csv')  # изменяем текущую директорую на папку с csv
 
-    if rewrite:
-        reprices_log_query = '''
-        SELECT
-            pf.product_id::varchar as product_id,
-            pf.price as price,
-            DATE(pf.date) as date_reprice,
-            pf.algorithm::int as algorithm
-        FROM 
-            pricing_api.pricing_final as pf
-        '''
-
-        reprices_errors_log_query = '''
-        SELECT 
-            DATE(pe.date) as date_error,
-            pe.product_id::varchar as product_id,
-            pe.algorithm::int as algorithm,
-            pe.fc_orp as price,
-            pe.rmin,
-            pe.rmax,
-            pe.type_error
-        FROM 
-            pricing_api.pricing_errors AS pe
-        '''
-
-        pricing_types_query = '''
-        SELECT
-             pt.type_id::int as algorithm,
-             pt.type_name::varchar as type_name
-        FROM 
-            pricing_api.pricing_types as pt
-        '''
-
-        products_reference_query = '''
-        WITH group_pricing AS (
-            SELECT 
-                pf.product_id AS product_id
+    # словарь dict_of_queries содержит в себе следующие пары ключ - значения:
+    # 'название предполагаемого датафрейма': ''' запрос '''
+    # в самих запросах можно настраивать период, за который необходимы данные (переменная period, how_long)
+    dict_of_queries = {
+        'reprices_log': '''
+            SELECT
+                pf.product_id::varchar as product_id,
+                pf.price as price,
+                DATE(pf.date) as date_reprice,
+                pf.algorithm::int as algorithm
             FROM 
-                pricing_api.pricing_final AS pf
-            UNION ALL 
+                pricing_api.pricing_final as pf
+            ''',
+        'reprices_errors_log': '''
             SELECT 
-                pe.product_id AS product_id
+                DATE(pe.date) as date_error,
+                pe.product_id::varchar as product_id,
+                pe.algorithm::int as algorithm,
+                pe.fc_orp as price,
+                pe.rmin,
+                pe.rmax,
+                pe.type_error
             FROM 
                 pricing_api.pricing_errors AS pe
-        )
-        SELECT 
-            DISTINCT pr."Ссылка"::varchar AS product_id,
-            pr."Наименование" AS product_name,
-            pr."Код"::int AS product_code
-        FROM data_lake.dim_products AS pr
-        INNER JOIN group_pricing
-            ON group_pricing.product_id = pr."Ссылка" 
-        '''
+            ''',
+        'pricing_types': '''
+            SELECT
+                 pt.type_id::int as algorithm,
+                 pt.type_name::varchar as type_name
+            FROM 
+                pricing_api.pricing_types as pt
+            ''',
+        'products_reference': '''
+            WITH group_pricing AS (
+                SELECT 
+                    pf.product_id AS product_id
+                FROM 
+                    pricing_api.pricing_final AS pf
+                UNION ALL 
+                SELECT 
+                    pe.product_id AS product_id
+                FROM 
+                    pricing_api.pricing_errors AS pe
+            )
+            SELECT 
+                DISTINCT pr."Ссылка"::varchar AS product_id,
+                pr."Наименование" AS product_name,
+                pr."Код"::int AS product_code
+            FROM data_lake.dim_products AS pr
+            INNER JOIN group_pricing
+                ON group_pricing.product_id = pr."Ссылка" 
+            '''
+    }
+    if rewrite:
+        for name_df, query in dict_of_queries.items():
+            to_save = pg_conn.execute_to_df(query)
+            to_save.to_csv(os.getcwd() + '\\{}.csv'.format(name_df), index_label=False)
 
-        reprices_log_df = pg_conn.execute_to_df(query=reprices_log_query)
-        reprices_log_df.to_csv(os.getcwd() + r'\reprices_log.csv', index_label=False)
-
-        reprices_errors_log_df = pg_conn.execute_to_df(query=reprices_errors_log_query)
-        reprices_errors_log_df.to_csv(os.getcwd() + r'\reprices_errors_log.csv', index_label=False)
-
-        pricing_types_df = pg_conn.execute_to_df(query=pricing_types_query)
-        pricing_types_df.to_csv(os.getcwd() + r'\pricing_types.csv', index_label=False)
-
-        products_reference_df = pg_conn.execute_to_df(query=products_reference_query)
-        products_reference_df.to_csv(os.getcwd() + '\products_reference.csv', index_label=False)
-
+        #датафрейм, содержащий дату последней записи данных
         write_date = pg_conn.execute_to_df(query='''SELECT NOW() as write_date''')
         write_date.to_csv(os.getcwd() + '\write_date.csv', index_label=False)
 
     os.chdir('..')  # возврат в предыдущую директорию
 
-csv_execute()

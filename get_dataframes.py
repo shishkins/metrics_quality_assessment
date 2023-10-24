@@ -3,7 +3,7 @@ import os
 
 
 def get_data():
-    os.chdir('../../projects_repositories/metrics_quality_assessment/csv')  # заходим в папку csv
+    os.chdir('csv')  # заходим в папку csv
     if not 'pricing_types.csv' in os.listdir():  # проверка наличия файлов в папке csv
         os.chdir('..')  # выходим из папки cs
         print(
