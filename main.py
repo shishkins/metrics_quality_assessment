@@ -11,11 +11,10 @@ import plotly.io as poi
 
 ''' GET DATA '''
 
-
 class data_lake():
     '''
     Класс объекта модели данных, принцип работы:
-    __init__ инициализирует модель данных через словарь позиционных аргументов **kwargs
+    __init__ инициализирует модель данных через словарь dict_of_dataframes, в котором содержатся все датафреймы через доступ по ключу
     Затем пользователем задаются аттрибуты фильтров
     После этого метод "filtered_df" выдает отфильтрованный датафрейм на работу
     '''
@@ -40,8 +39,8 @@ class data_lake():
         ''' Фильтры для алгоритмов '''
         self.picked_data = pd.DataFrame(
             {
-                'start_date': [self.reprices_log_df['date'].min()],
-                'end_date': [self.reprices_log_df['date'].max()]
+                'start_date': [self.main_df['date'].min()],
+                'end_date': [self.main_df['date'].max()]
             })
         self.picked_algorithms = self.pricing_types_df
 
@@ -84,6 +83,8 @@ class data_lake():
 
 
 ''' Получение данных, можно настроить вручную, какие датафреймы нужно получать '''
+
+
 reprices_data = data_lake(dict_of_dataframes=get_data())
 
 ''' LAYOUT '''
@@ -93,11 +94,11 @@ app = Dash(__name__,
            )
 
 calendar_button = dcc.DatePickerRange(id='date-picker',
-                                      min_date_allowed=min(reprices_data.reprices_log_df['date']),  # минимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
-                                      max_date_allowed=max(reprices_data.reprices_log_df['date']), # максимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
-                                      initial_visible_month=reprices_data.reprices_log_df['date'].mean(), # видимый месяц для выбора в календаре (среднее за все время)
-                                      start_date=min(reprices_data.reprices_log_df['date']),  # минимальная выбранная дата
-                                      end_date=max(reprices_data.reprices_log_df['date']) # максимальная выбранная дата
+                                      min_date_allowed=min(reprices_data.main_df['date']),  # минимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
+                                      max_date_allowed=max(reprices_data.main_df['date']), # максимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
+                                      initial_visible_month=reprices_data.main_df['date'].mean(), # видимый месяц для выбора в календаре (среднее за все время)
+                                      start_date=min(reprices_data.main_df['date']),  # минимальная выбранная дата
+                                      end_date=max(reprices_data.main_df['date']) # максимальная выбранная дата
                                       )
 
 algorithm_filter = dcc.Checklist(
@@ -137,12 +138,11 @@ app.layout = html.Div([
 
 @callback(
     Output('hist-prices-log', 'figure'),
-    [Input('hist-prices-log', 'figure'),
-     Input('date-picker', 'start_date'),
+    [Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date'),
      Input('check-list-algorithms', 'value')]
 )
-def update_output(figure,start_date, end_date, algorithms):
+def update_fig(start_date, end_date, algorithms):
     reprices_data.filters_date(start_date=start_date, end_date=end_date)
     reprices_data.filters_algorithms(algorithms=algorithms)
 
