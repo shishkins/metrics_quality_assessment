@@ -20,29 +20,30 @@ class data_lake():
     После этого метод "filtered_df" выдает отфильтрованный датафрейм на работу
     '''
 
-    def __init__(self, **kwargs):
+    def __init__(self, dict_of_dataframes):
         '''
         Инициализация объекта с данными
         :param kwargs:
         '''
-        self.__dict__.update(kwargs)
-        self.main_df = reprices_log_df.merge(calendar_df, on='date', how='left')
-        self.main_df = self.main_df.merge(products_reference_df, on='product_id', how='left')
-        self.main_df = self.main_df.merge(pricing_types_df, on='algorithm', how='left')
-        self.main_df = self.main_df.merge(write_date_df, how='cross')
-        self.errors_df = reprices_errors_log_df.merge(calendar_df, on='date', how='left')
-        self.errors_df = self.errors_df.merge(products_reference_df, on='product_id', how='left')
-        self.errors_df = self.errors_df.merge(pricing_types_df, on='algorithm', how='left')
-        self.errors_df = self.errors_df.merge(write_date_df, how='cross')
 
-        ''' FILTERS '''
+        ''' Организация главного датафрейма, настраивается пользователем'''
+        self.__dict__.update(dict_of_dataframes)
+        self.main_df = self.reprices_log_df.merge(self.calendar_df, on='date', how='left')
+        self.main_df = self.main_df.merge(self.products_reference_df, on='product_id', how='left')
+        self.main_df = self.main_df.merge(self.pricing_types_df, on='algorithm', how='left')
+        self.main_df = self.main_df.merge(self.write_date_df, how='cross')
+        self.errors_df = self.reprices_errors_log_df.merge(self.calendar_df, on='date', how='left')
+        self.errors_df = self.errors_df.merge(self.products_reference_df, on='product_id', how='left')
+        self.errors_df = self.errors_df.merge(self.pricing_types_df, on='algorithm', how='left')
+        self.errors_df = self.errors_df.merge(self.write_date_df, how='cross')
+
+        ''' Фильтры для алгоритмов '''
         self.picked_data = pd.DataFrame(
             {
-                'start_date': [reprices_log_df['date'].min()],
-                'end_date': [reprices_log_df['date'].max()]
+                'start_date': [self.reprices_log_df['date'].min()],
+                'end_date': [self.reprices_log_df['date'].max()]
             })
-        self.picked_algorithms = pricing_types_df
-        ''' FILTERS '''
+        self.picked_algorithms = self.pricing_types_df
 
     def filters_date(self, start_date=None, end_date=None):
         '''
@@ -82,18 +83,8 @@ class data_lake():
         return severed_df
 
 
-pricing_types_df, products_reference_df, reprices_errors_log_df, reprices_log_df, calendar_df, write_date_df = get_data()
-
-dict_of_dfs = {'pricing_types_df': pricing_types_df,
-               'product_reference_df': products_reference_df,
-               'reprices_errors_log_df': reprices_errors_log_df,
-               'calendar_df': calendar_df}
-
-reprices_data = data_lake(pricing_types_df=pricing_types_df,
-                          products_reference_df=products_reference_df,
-                          reprices_errors_log_df=reprices_errors_log_df,
-                          reprices_log_df=reprices_log_df,
-                          calendar_df=calendar_df)
+''' Получение данных, можно настроить вручную, какие датафреймы нужно получать '''
+reprices_data = data_lake(dict_of_dataframes=get_data())
 
 ''' LAYOUT '''
 
@@ -102,17 +93,17 @@ app = Dash(__name__,
            )
 
 calendar_button = dcc.DatePickerRange(id='date-picker',
-                                      min_date_allowed=min(calendar_df['date']),
-                                      max_date_allowed=max(calendar_df['date']),
-                                      initial_visible_month=reprices_log_df['date'].mean(),
-                                      start_date=min(calendar_df['date']),
-                                      end_date=max(calendar_df['date'])
+                                      min_date_allowed=min(reprices_data.reprices_log_df['date']),  # минимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
+                                      max_date_allowed=max(reprices_data.reprices_log_df['date']), # максимально-допустимая выбираемая дата, определена как минимум у объекта модели данных
+                                      initial_visible_month=reprices_data.reprices_log_df['date'].mean(), # видимый месяц для выбора в календаре (среднее за все время)
+                                      start_date=min(reprices_data.reprices_log_df['date']),  # минимальная выбранная дата
+                                      end_date=max(reprices_data.reprices_log_df['date']) # максимальная выбранная дата
                                       )
 
 algorithm_filter = dcc.Checklist(
     id='check-list-algorithms',
-    options=[{'label': option, 'value': option} for option in pricing_types_df['type_name']],
-    value=pricing_types_df['type_name']
+    options=[{'label': option, 'value': option} for option in reprices_data.pricing_types_df['type_name']],
+    value=reprices_data.pricing_types_df['type_name']
 )
 
 reprices_log_fig = dcc.Graph(id='hist-prices-log',

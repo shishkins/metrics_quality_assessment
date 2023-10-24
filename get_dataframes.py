@@ -36,11 +36,10 @@ def get_data():
                                    end=date(2024,1,1))
     calendar_df = pd.DataFrame({'date': date_range_ser,
                                 'week_day': date_range_ser.weekday})
+
     dict_of_dataframes['calendar_df'] = calendar_df
 
     #                            )
     # for elem in reprices_log_df['date_reprice']:
     #     print(type(elem))
     return dict_of_dataframes
-
-data = get_data()
