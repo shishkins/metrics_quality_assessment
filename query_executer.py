@@ -39,8 +39,12 @@ def csv_execute(period='month', how_long='3', rewrite=True):
     ch_conn = get_fspb_ch_conn()
 
     if not os.path.isdir("csv"):
-        os.mkdir("csv") # создание папки с csv файлами, если таковой не имеется
-    os.chdir('csv')  # изменяем текущую директорую на папку с csv
+        os.mkdir("csv") # создание папки с csv файлами, если такой не имеется
+    else:
+        os.chdir('csv')  # изменяем текущую директорую на папку с csv
+        for file in os.listdir():
+            os.remove(file) # удаляем все файлы из директории csv
+
 
     # словарь dict_of_queries содержит в себе следующие пары ключ - значения:
     # 'название предполагаемого датафрейма': ''' запрос '''
@@ -131,6 +135,7 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     full_sale.*,
                     prod."Категория" as category_id,
                     prod."Код" as product_code,
+                    prod."Наименование",
                     COALESCE(full_sale.count_sale, 0.01) / COALESCE(seasonality."WeekSeasonalFactor", 1) :: float AS clean_count_sale --очищаем продажи от недельной сезонности--
                 FROM 
                     full_sale
@@ -157,19 +162,18 @@ def csv_execute(period='month', how_long='3', rewrite=True):
 
     if rewrite:
         for name_df, query in dict_of_queries.items():
-            print(f'Выполняется загрузка данных для запроса:\n{name_df}')
+            print(f'Выполняется загрузка данных для запроса: "{name_df}"')
             start_time_query = time.time()
             to_save = pg_conn.execute_to_df(query)
             start_time_csv = time.time()
             to_save.to_csv(os.getcwd() + '\\{}.csv'.format(name_df), index_label=False)
             end_time_csv = time.time()
-            print(f'Загрузка данных для запроса "{name_df}" завершена\nДлительность выполнения запроса: {round(start_time_csv-start_time_query,2)}\nДлительность записи файла: {round(end_time_csv-start_time_csv,2)}')
-            print('-'*20)
+            print(f'Загрузка данных для запроса "{name_df}" завершена\nДлительность выполнения запроса: {round(start_time_csv-start_time_query,2)}\nДлительность записи csv: {round(end_time_csv-start_time_csv,2)}')
+            print('-'*50)
+
 
         #датафрейм, содержащий дату последней записи данных
         write_date = pg_conn.execute_to_df(query='''SELECT NOW() as write_date''')
         write_date.to_csv(os.getcwd() + '\write_date.csv', index_label=False)
 
     os.chdir('..')  # возврат в предыдущую директорию
-
-csv_execute()

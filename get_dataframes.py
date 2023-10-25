@@ -17,19 +17,23 @@ def get_data():
 
 
     ''' Преобразование типов данных, настраивается пользователем '''
-    reprices_log_df = dict_of_dataframes['reprices_log_df']
-    reprices_errors_log_df = dict_of_dataframes['reprices_errors_log_df']
+    sales_and_coeffs_df = dict_of_dataframes['sales_and_coeffs_df']
+    hierarchy_df = dict_of_dataframes['hierarchy_df']
+    write_date_df = dict_of_dataframes['write_date_df']
 
     # изменение типа данных
-    reprices_log_df['date_reprice'] = pd.to_datetime(reprices_log_df['date_reprice'])
-    reprices_errors_log_df['date_error'] = pd.to_datetime(reprices_errors_log_df['date_error'])
+    sales_and_coeffs_df['current_price_date'] = pd.to_datetime(sales_and_coeffs_df['current_price_date'])
+    sales_and_coeffs_df['last_price_date'] = pd.to_datetime(sales_and_coeffs_df['last_price_date'])
+    sales_and_coeffs_df['sale_date'] = pd.to_datetime(sales_and_coeffs_df['sale_date'])
+    sales_and_coeffs_df['product_code'] = sales_and_coeffs_df['product_code'].astype('int64')
+    write_date_df['write_date'] = pd.to_datetime(write_date_df['write_date'])
 
-    reprices_log_df.rename(columns={'date_reprice': 'date'}, inplace=True)
-    reprices_errors_log_df.rename(columns={'date_error': 'date'}, inplace=True)
+    sales_and_coeffs_df.rename(columns={'sale_date': 'date'}, inplace=True)
 
-    # загрузка измененного датафрейма в словарь
-    dict_of_dataframes['reprices_log_df'] = reprices_log_df
-    dict_of_dataframes['reprices_errors_log_df'] = reprices_errors_log_df
+    # загрузка измененных датафреймов в словарь
+    dict_of_dataframes['sales_and_coeffs_df'] = sales_and_coeffs_df
+    dict_of_dataframes['hierarchy_df'] = hierarchy_df
+    dict_of_dataframes['write_date_df'] = write_date_df
 
     ''' Создание календаря '''
     date_range_ser = pd.date_range(start=date(2023,1,1),
