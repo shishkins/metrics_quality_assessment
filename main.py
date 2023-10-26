@@ -98,9 +98,8 @@ class data_lake():
 sales_data = data_lake(dict_of_dataframes=get_data())
 
 ''' LAYOUT '''
-
 app = Dash(__name__,
-           external_stylesheets=[dbc.themes.FLATLY],
+           external_stylesheets=[dbc.themes.YETI],
            )
 
 calendar_button = dcc.DatePickerRange(id='date-picker',
@@ -117,26 +116,7 @@ calendar_button = dcc.DatePickerRange(id='date-picker',
 sale_graph = dcc.Graph(id='graph-sales-log',
                        figure=go.Figure())
 
-# department_items_list = list(sales_data.hierarchy_df['department_name'].unique())  #отбор списка департамента
-# print(department_items_list)
-# department_items_list.sort(key=lambda x: int(x[0:2]))  #сортировка для адекватного отображения
-# department_items = [dbc.DropdownMenuItem(department) for department in department_items_list]
-#
-# department_items_1_menu = sales_data.hierarchy_df.loc[sales_data.hierarchy_df['department_name'] == department_items_list[0],'name_2'].unique()
-# print(department_items_1_menu)
-# department_items_1_menu = [dbc.DropdownMenuItem(department_1) for department_1 in department_items_1_menu]
-# department_items_1 = dbc.DropdownMenu(
-#     label = department_items[0],
-#     children = department_items_1_menu,
-#     direction = 'end'
-# )
-# department_items[0] = department_items_1
-#
-# hierarchy_filter = dbc.DropdownMenu(
-#     label = 'Департамент',
-#     children = department_items,
-#     direction = 'end'
-# )
+
 
 product_filter_list = dcc.Dropdown(
     id='product-list',
@@ -157,14 +137,13 @@ app.layout = dbc.Container([
                  ])
     ], style={'margin-bottom': 40}),
     dbc.Row([
-        dbc.Col([
-            html.Div('Количество переоценок по датам:'),
             sale_graph
-        ])
-    ])
+        ],
+    style= {'size': '200px'})
 ],
     style={'margin-left': '80px',
-           'margin-right': '80px'})
+           'margin-right': '80px'},
+    className= 'dbc')
 
 ''' CALLBACKS '''
 
@@ -179,51 +158,57 @@ def update_fig(start_date, end_date, picked_code):
     sales_data.filters_date(start_date=start_date, end_date=end_date)
     sales_data.picked_product = picked_code
     need_to_view_df = sales_data.filtered_df(sales_data.main_df)
+
     sales_fig = go.Figure()
     sales_fig.update_layout(xaxis={'type': 'date'})
 
 
     for reprice_date in need_to_view_df['current_price_date'].dt.date.unique():
         need_to_view_df_reprice = need_to_view_df.loc[need_to_view_df['current_price_date'].dt.date == reprice_date]
-        sales_fig.add_trace(go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
-                                       y=need_to_view_df_reprice['count_sale'],
-                                       name = 'Продажи',
-                                       mode='lines+markers',
-                                       text = need_to_view_df_reprice['date'].dt.date,
-                                       hovertemplate= 'Количество продаж: %{y}<br>Дата: %{x}',
-                                       legendgroup= str(reprice_date),
-                                       line= {
-                                           'color': 'rgb(255,99,71)'
-                                       }))
-        sales_fig.add_trace(go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
-                                       y=need_to_view_df_reprice['clean_count_sale'],
-                                       name='Очищенные продажи',
-                                       mode='lines+markers',
-                                       text=need_to_view_df_reprice['date'].dt.date,
-                                       hovertemplate='Количество очищенных продаж: %{y}<br>Дата: %{x}',
-                                       legendgroup=str(reprice_date),
-                                       showlegend=True,
-                                       line= {
-                                           'color': 'rgba(30,144,255,0.9)'
-                                       }))
-        # sales_fig.add_vline(x=reprice_date,
-        #                     line_width=1,
-        #                     line_dash='dash',
-        #                     line_color='red',
-        #                     legendgroup=str(reprice_date))
+        count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                   y=need_to_view_df_reprice['count_sale'],
+                                   name='Продажи',
+                                   mode='lines+markers',
+                                   hovertemplate='<b>Количество: %{y}' +
+                                                 '<br>Дата: %{x}' +
+                                                 '<br>%{text}</b>',
+                                   text='Код товара: ' + need_to_view_df_reprice['product_code'].astype('str'),
+                                   legendgroup=str(reprice_date),
+                                   line={
+                                       'color': 'rgb(255,99,71)',
+                                   })
+        clean_count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                         y=need_to_view_df_reprice['clean_count_sale'],
+                                         name='Очищенные продажи',
+                                         mode='lines+markers',
+                                         hovertemplate='<b>Количество: %{y}' +
+                                                       '<br>Дата: %{x}' +
+                                                       '<br>%{text}</b>',
+                                         text = 'Код товара: ' + need_to_view_df_reprice['product_code'].astype('str'),
+                                         legendgroup=str(reprice_date),
+                                         showlegend=True,
+                                         line={
+                                             'color': 'rgba(30,144,255,0.9)'
+                                         })
+        # count_scatter.name = 'Продажи'
+
+        sales_fig.add_trace(count_scatter)
+        sales_fig.add_trace(clean_count_scatter)
+        sales_fig.update_layout(hoverlabel_font = {'size': 16},
+                                font_size = 20)
 
         sales_fig.add_shape(
             type="line",
             x0=reprice_date,
             y0=0,
             x1=reprice_date,
-            y1=need_to_view_df['count_sale'].max(),
+            y1=need_to_view_df_reprice['count_sale'].max(),
             line=dict(
                 color="red",
                 dash="dash"
             ),
             legendgroup=str(reprice_date),
-            name = 'Переоценка: ' + str(reprice_date),
+            name = 'Переоценка: ' + str(reprice_date) + f'\n<b>Код товара: {need_to_view_df_reprice["product_code"].unique()[0].astype("str")}</b>',
             showlegend=True
         )
 
