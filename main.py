@@ -187,22 +187,45 @@ def update_fig(start_date, end_date, picked_code):
         need_to_view_df_reprice = need_to_view_df.loc[need_to_view_df['current_price_date'].dt.date == reprice_date]
         sales_fig.add_trace(go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                        y=need_to_view_df_reprice['count_sale'],
-                                       name = 'Переоценка: '+ str(reprice_date),
+                                       name = 'Продажи',
                                        mode='lines+markers',
                                        text = need_to_view_df_reprice['date'].dt.date,
                                        hovertemplate= 'Количество продаж: %{y}<br>Дата: %{x}',
-                                       legendgroup= str(reprice_date)))
+                                       legendgroup= str(reprice_date),
+                                       line= {
+                                           'color': 'rgb(255,99,71)'
+                                       }))
         sales_fig.add_trace(go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                        y=need_to_view_df_reprice['clean_count_sale'],
-                                       name='Переоценка: ' + str(reprice_date),
+                                       name='Очищенные продажи',
                                        mode='lines+markers',
                                        text=need_to_view_df_reprice['date'].dt.date,
                                        hovertemplate='Количество очищенных продаж: %{y}<br>Дата: %{x}',
-                                       legendgroup=str(reprice_date)))
-        sales_fig.add_vline(x=reprice_date,
-                            line_width=1,
-                            line_dash='dash',
-                            line_color='red')
+                                       legendgroup=str(reprice_date),
+                                       showlegend=True,
+                                       line= {
+                                           'color': 'rgba(30,144,255,0.9)'
+                                       }))
+        # sales_fig.add_vline(x=reprice_date,
+        #                     line_width=1,
+        #                     line_dash='dash',
+        #                     line_color='red',
+        #                     legendgroup=str(reprice_date))
+
+        sales_fig.add_shape(
+            type="line",
+            x0=reprice_date,
+            y0=0,
+            x1=reprice_date,
+            y1=need_to_view_df['count_sale'].max(),
+            line=dict(
+                color="red",
+                dash="dash"
+            ),
+            legendgroup=str(reprice_date),
+            name = 'Переоценка: ' + str(reprice_date),
+            showlegend=True
+        )
 
     return sales_fig
 
