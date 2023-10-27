@@ -25,7 +25,7 @@ def get_data():
     sales_and_coeffs_df['current_price_date'] = pd.to_datetime(sales_and_coeffs_df['current_price_date'])
     sales_and_coeffs_df['last_price_date'] = pd.to_datetime(sales_and_coeffs_df['last_price_date'])
     sales_and_coeffs_df['sale_date'] = pd.to_datetime(sales_and_coeffs_df['sale_date'])
-    sales_and_coeffs_df['product_code'] = sales_and_coeffs_df['product_code'].astype('int64')
+    sales_and_coeffs_df['product_code'] = sales_and_coeffs_df['product_code'].astype('str')
     write_date_df['write_date'] = pd.to_datetime(write_date_df['write_date'])
 
     sales_and_coeffs_df.rename(columns={'sale_date': 'date'}, inplace=True)
