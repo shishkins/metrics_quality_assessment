@@ -178,4 +178,4 @@ def csv_execute(period='month', how_long='3', rewrite=True):
 
     os.chdir('..')  # возврат в предыдущую директорию
 
-csv_execute()
+# csv_execute()
