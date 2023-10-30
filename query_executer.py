@@ -177,3 +177,5 @@ def csv_execute(period='month', how_long='3', rewrite=True):
         write_date.to_csv(os.getcwd() + '\write_date.csv', index_label=False)
 
     os.chdir('..')  # возврат в предыдущую директорию
+
+csv_execute()

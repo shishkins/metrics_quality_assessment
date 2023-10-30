@@ -1,0 +1,14 @@
+/venv/
+/.idea/
+/login_password.txt/
+/.env/
+/sales_and_coeffs.csv/
+/.gitignore/
+/generate_hierarchy.py/
+/testdir.py/
+/hierarchy.csv/
+/sales_and_coeffs.csv/
+/write_date.csv/
+/csv/
+
+

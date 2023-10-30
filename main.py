@@ -2,8 +2,6 @@
 import warnings
 
 warnings.filterwarnings('ignore')
-import re
-
 from dash import Dash, html, dash_table, dcc, callback, Output, Input
 from query_executer import csv_execute
 from get_dataframes import get_data
@@ -13,7 +11,15 @@ import plotly.graph_objects as go
 import pandas as pd
 import random
 import plotly.express as px
+
+
+
 import plotly.io as poi
+from dash_bootstrap_templates import load_figure_template
+load_figure_template("SKETCHY")
+theme = dbc.themes.SKETCHY
+
+
 
 ''' GET DATA '''
 
@@ -121,9 +127,10 @@ class data_lake():
 
 sales_data = data_lake(dict_of_dataframes=get_data())
 
+
 ''' LAYOUT '''
 app = Dash(__name__,
-           external_stylesheets=[dbc.themes.LUX],
+           external_stylesheets=[theme],
            )
 
 calendar_button = dcc.DatePickerRange(id='date-picker',
@@ -140,11 +147,16 @@ calendar_button = dcc.DatePickerRange(id='date-picker',
 sale_graph = dcc.Graph(id='graph-sales-log',
                        figure=go.Figure(),
                        className='dbc')
+revenue_graph = dcc.Graph(id='graph-revenue-log',
+                       figure=go.Figure(),
+                       className='dbc',
+                       config = {'displayModeBar': False})
 
 product_filter_list = dcc.Dropdown(
     id='product-list',
     options=sales_data.filtered_products_koeffs['product_code'].unique(),
-    placeholder='Введите код товара..'
+    placeholder='Введите код товара..',
+    className= 'dbc'
 )
 
 value_koeff_filter = dbc.Col(
@@ -192,9 +204,10 @@ value_koeff_filter = dbc.Col(
                         dbc.RadioItems(
                             id="radios-koeff-profit",
                             class_name="btn-group",
-                            inputClassName="btn-check",
-                            labelClassName="btn btn-outline-primary",
-                            labelCheckedClassName="active",
+                            labelClassName="date-group-labels",
+                            labelCheckedClassName="date-group-labels-checked",
+                            className="date-group-items",
+                            inline=True,
                             options=[
                                 {"label": "Меньше <=", "value": 1},
                                 {"label": "Равно =", "value": 2},
@@ -278,7 +291,8 @@ app.layout = dbc.Container(
         ),
         dbc.Row(
             [
-                sale_graph
+                sale_graph,
+                revenue_graph
             ]
         )
     ],
@@ -289,17 +303,19 @@ app.layout = dbc.Container(
 
 
 @callback(
+    Output('graph-revenue-log', 'figure'),
     Output('graph-sales-log', 'figure'),
     [Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date'),
      Input('product-list', 'value')]
 )
 def update_fig(start_date, end_date, picked_code):
-    print(sales_data.picked_product)
     sales_data.filters_date(start_date=start_date, end_date=end_date)
     sales_data.picked_product = picked_code
     need_to_view_df = sales_data.filtered_df(sales_data.main_df)
     sales_fig = go.Figure()
+    revenue_fig = go.Figure()
+    revenue_fig.update_layout(xaxis={'type': 'date'})
     sales_fig.update_layout(xaxis={'type': 'date'})
 
 
@@ -309,9 +325,9 @@ def update_fig(start_date, end_date, picked_code):
         need_to_view_df_reprice = need_to_view_df.loc[need_to_view_df['current_price_date'].dt.date == reprice_date]  #находим конкретную переоценку
 
         if need_to_view_df_reprice['reprice_flag'].unique() == True:  #задание параметра прозрачности в зависимости от выбранных параметров коэффициентов
-            opacity = '0.9'
+            opacity = 0.9
         else:
-            opacity = '0.3'
+            opacity = 0.3
 
         count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                    y=need_to_view_df_reprice['count_sale'],
@@ -322,9 +338,7 @@ def update_fig(start_date, end_date, picked_code):
                                                  '<br>%{text}</b>',
                                    text='Код товара: ' + need_to_view_df_reprice['product_code'],
                                    legendgroup=str(reprice_date),
-                                   line={
-                                       'color': 'rgba(255,99,71,'+opacity+')',
-                                   })
+                                   opacity= opacity)
         clean_count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                          y=need_to_view_df_reprice['clean_count_sale'],
                                          name='Очищенные продажи',
@@ -335,14 +349,12 @@ def update_fig(start_date, end_date, picked_code):
                                          text='Код товара: ' + need_to_view_df_reprice['product_code'],
                                          legendgroup=str(reprice_date),
                                          showlegend=True,
-                                         line={
-                                             'color': 'rgba(30,144,255,'+opacity+')'
-                                         })
-
+                                         opacity= opacity)
+        str(need_to_view_df_reprice['product_code'].iloc[0])
         sales_fig.add_trace(count_scatter)
         sales_fig.add_trace(clean_count_scatter)
-        sales_fig.update_layout(hoverlabel_font={'size': 16},
-                                font_size=20)
+        # sales_fig.update_layout(hoverlabel_font={'size': 16},
+        #                         font_size=20)
 
         sales_fig.add_shape(
             type="line",
@@ -351,16 +363,47 @@ def update_fig(start_date, end_date, picked_code):
             x1=reprice_date,
             y1=need_to_view_df_reprice['count_sale'].max(),
             line=dict(
-                color='rgba(255,69,0,'+opacity+')',
                 dash="dash"
             ),
+            opacity = opacity,
             legendgroup=str(reprice_date),
             name='Переоценка: ' + str(
                 reprice_date) + f'\n<b>Код товара: {need_to_view_df_reprice["product_code"].unique()[0]}</b>',
             showlegend=True
         )
 
-    return sales_fig
+        revenue_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                     y=need_to_view_df_reprice['sum_sale_clean'],
+                                     name='Оборот',
+                                     mode='lines+markers',
+                                     hovertemplate='<b>Количество: %{y}' +
+                                                   '<br>Дата: %{x}' +
+                                                   '<br>%{text}</b>',
+                                     text='Код товара: ' + need_to_view_df_reprice['product_code'],
+                                     legendgroup=str(reprice_date),
+                                     opacity= opacity)
+
+        revenue_fig.add_trace(revenue_scatter)
+        # revenue_fig.update_layout(hoverlabel_font={'size': 16},
+        #                           font_size=20)
+
+        revenue_fig.add_shape(
+            type="line",
+            x0=reprice_date,
+            y0=0,
+            x1=reprice_date,
+            y1=need_to_view_df_reprice['sum_sale_clean'].max(),
+            line=dict(
+                dash="dash"
+            ),
+            opacity = opacity,
+            legendgroup=str(reprice_date),
+            name='Переоценка: ' + str(
+                reprice_date) + f'\n<b>Код товара: {need_to_view_df_reprice["product_code"].unique()[0]}</b>',
+            showlegend=True
+        )
+
+    return sales_fig, revenue_fig
 
 
 @callback(
