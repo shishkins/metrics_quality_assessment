@@ -32,6 +32,17 @@ def get_data():
     # расчет некоторых величин
     koeffs_df = sales_and_coeffs_df[['koef_change_sale','koef_change_revenue','koef_change_profit']].drop_duplicates()
 
+    indicators_for_coeffs = pd.DataFrame(
+        {
+            'koef_change_sale_nulls': [koeffs_df.loc[koeffs_df['koef_change_sale'] == 0, 'koef_change_sale'].count()],
+            'koef_change_revenue_nulls': [
+                koeffs_df.loc[koeffs_df['koef_change_revenue'] == 0, 'koef_change_revenue'].count()],
+            'koef_change_profit_nulls': [
+                koeffs_df.loc[koeffs_df['koef_change_profit'] == 0, 'koef_change_profit'].count()],
+            'all_reprices_count': [koeffs_df.shape[0]]
+        }
+    )
+
     # Создаем pd.cut объект с интервалами
     params_of_interval = {
         'min': -100,
@@ -46,9 +57,9 @@ def get_data():
     bins = pd.IntervalIndex.from_arrays(array_up, array_down)
 
     # считает количество вхождений каждого коэффициента в каждый бин, созданный выше
-    sales = pd.cut(x=koeffs_df['koef_change_sale'], bins=bins)
-    revenue = pd.cut(x=koeffs_df['koef_change_revenue'], bins=bins)
-    profit = pd.cut(x=koeffs_df['koef_change_profit'], bins=bins)
+    sales = pd.cut(x=koeffs_df.loc[koeffs_df['koef_change_sale'] != 0, 'koef_change_sale'], bins=bins)
+    revenue = pd.cut(x=koeffs_df.loc[koeffs_df['koef_change_revenue'] != 0, 'koef_change_revenue'], bins=bins)
+    profit = pd.cut(x=koeffs_df.loc[koeffs_df['koef_change_profit'] != 0, 'koef_change_profit'], bins=bins)
     sales_counts = sales.value_counts()
     revenue_counts = revenue.value_counts()
     profit_counts = profit.value_counts()
@@ -74,6 +85,8 @@ def get_data():
     dict_of_dataframes['hierarchy_df'] = hierarchy_df
     dict_of_dataframes['write_date_df'] = write_date_df
     dict_of_dataframes['koeff_counts'] = koeff_counts
+    dict_of_dataframes['koeffs_df'] = koeffs_df
+    dict_of_dataframes['indicators_for_coeffs'] = indicators_for_coeffs
 
 
     ''' Создание календаря '''
