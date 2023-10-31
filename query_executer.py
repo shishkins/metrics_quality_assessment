@@ -59,7 +59,10 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     cosc.periodic,
                     cosc.koef_change_sale,
                     cosc.koef_change_revenue,
-                    cosc.koef_change_profit
+                    cosc.koef_change_profit,
+                    cosc.current_price,
+                    cosc.last_price,
+                    cosc.delta_price
                 FROM 
                     metrics_orp.coefficient_of_sales_change AS cosc
             ), count_90 AS (
@@ -72,6 +75,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     coeff_table.koef_change_sale,
                     coeff_table.koef_change_revenue,
                     coeff_table.koef_change_profit,
+                    coeff_table.current_price,
+                    coeff_table.last_price,
+                    coeff_table.delta_price,
                     CASE 
                         WHEN korp."ВидКонтрагента" = 'Организация' OR korp."ВидКонтрагента" = 'ЧастноеЛицо'
                             THEN 1
@@ -118,7 +124,10 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     sum(sale.count_sale) AS count_sale,
                     sum(sale.sum_sale) AS sum_sale,
                     sum(sale.sum_sale_clean) AS sum_sale_clean,
-                    sum(sale.cost_price_clean) AS cost_price_clean
+                    sum(sale.cost_price_clean) AS cost_price_clean,
+                    sale.current_price,
+                    sale.last_price,
+                    sale.delta_price
                 FROM
                     count_90 AS sale
                 GROUP BY 
@@ -129,7 +138,10 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     sale.periodic,
                     sale.koef_change_sale,
                     sale.koef_change_revenue,
-                    sale.koef_change_profit
+                    sale.koef_change_profit,
+                    sale.current_price,
+                    sale.last_price,
+                    sale.delta_price
             ), seasonality as (
                 SELECT
                     full_sale.*,

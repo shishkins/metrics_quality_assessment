@@ -15,8 +15,8 @@ import plotly.express as px
 import plotly.io as poi
 from dash_bootstrap_templates import load_figure_template
 
-load_figure_template("LUMEN")
-theme = dbc.themes.LUMEN
+load_figure_template("CERULEAN")
+theme = dbc.themes.CERULEAN
 
 ''' GET DATA '''
 
@@ -68,13 +68,32 @@ class data_lake():
         self.picked_data = limits
 
     def filter_product(self):
+        '''
+        В основе работы функции лежит цикл, который перебирает все параметры, которые выбрал пользователь.
+        Параметры self.picked_koeffs хранятся в объекте модели данных как словарь коэффициент - (значение, в какую сторону).
+        Перебирая значения словаря методом .items(), формируется датафрейм to_filter, подходящий под условия фильтрации
+        Выхлоп функции - создание датафрейма self.filtered_products_koeffs, который участвует в формировании доступного списка опций в DropDown меню выбора товара;
+        А так же участвует в присвоении флага reprice_flag - помечающий те переоценки у товаров, где этот коэффициент подходит под условия фильтрации.
 
+        Пример:
+        Пользователь выбрал КПРОД = 200 >=, КПРИБ: 100 >=, КОБ: None
+        Пройдя цикл формируется to_filter, содержащий все записи с вышеупомянутыми условиями.
+        Создается filtered_products_koeffs с пометкой reprice_flag = True, и датой переоценки для соединения в дальнейшем
+        '''
         to_filter = self.main_df[['product_code', 'koef_change_sale', 'koef_change_revenue', 'koef_change_profit',
                                   'current_price_date']]  # то что будем фильтровать
+
+        # достаточно неоднозначный для понимания цикл, принцип его работы:
+        # Итера
         for koef, tuple_value in self.picked_koeffs.items():
 
-            if koef is None or tuple_value[0] is None or (tuple_value[1] is None or tuple_value[1] == 4):
+            if \
+                    (koef is None) \
+                            or (tuple_value[0] is None) \
+                            or (tuple_value[1] is None or tuple_value[1] == 4):
                 continue
+            if tuple_value[0] == '':
+                tuple_value = (0, tuple_value[1])
             if tuple_value[1] == 1:
                 to_filter = to_filter.loc[to_filter[koef] <= float(tuple_value[0])]
             elif tuple_value[1] == 2:
@@ -155,44 +174,87 @@ for name_koeff, koeff in zip(
                        name=name_koeff,
                        hovertemplate='<b>Количество вхождений: %{y}' +
                                      '<br>Интервал: %{x}' +
-                                     '<br>%{text}</b>',
+                                     '<br>%{name_koeff}</b>',
                        text=name_koeff)
     koeffs_fig_hist.add_trace(koeff_bar)
 
+''' Задание графических объектов '''
 
+sale_graph = dbc.Card(
+    [
+        dbc.CardHeader('График изменения продаж'),
+        dcc.Graph(id='graph-sales-log',
+                  figure=go.Figure(),
+                  className='dbc')
+    ]
+)
+revenue_graph = dbc.Card(
+    [
+        dbc.CardHeader('График изменения оборота'),
+        dcc.Graph(id='graph-revenue-log',
+                  figure=go.Figure(),
+                  className='dbc')
+    ]
+)
 
-sale_graph = dcc.Graph(id='graph-sales-log',
-                       figure=go.Figure(),
-                       className='dbc')
 
 # koeff_graph = dcc.Graph(id='koeff-sales-log',
 #                         figure=koeffs_fig,
 #                         className='dbc')
+margin_graph = dbc.Card(
+    [
+        dbc.CardHeader(
+            children= 'График изменения маржи'
+        ),
+        dcc.Graph(id='margin-sales-log',
+                  figure=go.Figure(),
+                  className='dbc')
+    ]
+)
 
-margin_graph = dcc.Graph(id='margin-sales-log',
-                         figure=go.Figure(),
-                         className='dbc')
+koeffs_hist_graph = dbc.Card(
+    [
+        dbc.CardHeader('Распределение коэффициентов по интервалам'),
+        dcc.Graph(id='koeffs_hist',
+                  figure=koeffs_fig_hist,
+                  className='dbc')
+    ]
+)
 
-revenue_graph = dcc.Graph(id='graph-revenue-log',
-                          figure=go.Figure(),
-                          className='dbc')
-koeffs_hist_graph = dcc.Graph(id='koeffs_hist',
-                              figure=koeffs_fig_hist,
-                              className='dbc')
-
-product_filter_list = dcc.Dropdown(
-    id='product-list',
-    options=sales_data.filtered_products_koeffs['product_code'].unique(),
-    placeholder='Введите код товара..',
-    className='dbc',
-    style={
-        'font-size': 20
+product_filter_list = html.Div(
+    [
+        dcc.Dropdown(
+            id='product-list',
+            options=sales_data.filtered_products_koeffs['product_code'].unique(),
+            placeholder='Введите код товара..'
+        )
+    ],
+    className="dash-bootstrap"
+)
+table_limits_df = pd.DataFrame(
+    {
+        ("Пределы", "Макс"): {
+            'Коэффициент изменения продаж ("КПРОД")': sales_data.main_df['koef_change_sale'].max(),
+            'Коэффициент изменения прибыли ("КПРИБ")': sales_data.main_df['koef_change_profit'].max(),
+            'Коэффициент изменения оборота ("КОБ")': sales_data.main_df['koef_change_revenue'].max(),
+        },
+        ("Пределы", "Мин"): {
+            'Коэффициент изменения продаж ("КПРОД")': sales_data.main_df['koef_change_sale'].min(),
+            'Коэффициент изменения прибыли ("КПРИБ")': sales_data.main_df['koef_change_profit'].min(),
+            'Коэффициент изменения оборота ("КОБ")': sales_data.main_df['koef_change_revenue'].min(),
+        },
     }
 )
+table_limits_df.index.set_names("Коэффициент", inplace=True)
+
+table_limits = dbc.Table.from_dataframe(
+    table_limits_df, striped=True, bordered=True, hover=True, index=True
+)
+
 
 value_koeff_filter = dbc.Card(
     [
-        dbc.CardHeader('В этой карточке вы можете настроить поиск товаров по значениям коэффициентов'),
+        dbc.CardHeader('В этом поле вы можете настроить поиск товаров по значениям коэффициентов'),
         dbc.CardBody(
             [
                 dbc.Row(
@@ -302,6 +364,11 @@ value_koeff_filter = dbc.Card(
                             align='start'
                         )
                     ]
+                ),
+                dbc.Row(
+                    [
+                        table_limits
+                    ]
                 )
             ]
         )
@@ -324,24 +391,19 @@ app.layout = html.Div(
                 dbc.Col(
                     [
                         value_koeff_filter
-                        # dbc.Card(
-                        #     dbc.Ca
-                        # )
                     ],
                     width={
                         'size': 4,
                         'offset': 0,
-                        'order': 1
                     }
                 ),
                 dbc.Col(
                     [
-                        dbc.Card(koeffs_hist_graph)
+                        koeffs_hist_graph
                     ],
                     width={
-                        'size': 6,
-                        'offset': 0,
-                        'order': 2
+                        'size':7,
+                        'offset': 0
                     },
                 )
             ],
@@ -353,40 +415,53 @@ app.layout = html.Div(
             [
                 html.H1(children='Выберете товар',
                         id='h1-chose',
-                        style={'margin-bottom': 40,
+                        style={'margin-bottom': 10,
                                'margin-left': 40,
                                'margin-top:': 40}
                         ),
                 html.H3(children='',
                         id='h3-chosed-product',
-                        style={'margin-bottom': 40,
+                        style={'margin-bottom': 5,
                                'margin-left': 40,
-                               'margin-top:': 40}
+                               'margin-top:': 5}
+                        ),
+                html.H5(children='',
+                        id='h5-chosed-product',
+                        style={'margin-bottom': 10,
+                               'margin-left': 40,
+                               'margin-top:': 5}
                         ),
                 dbc.Col(
                     [
                         sale_graph,
                         revenue_graph,
                         margin_graph
-                    ]
+                    ],
+                    width = {
+                        'size':5
+                    }
                 ),
                 dbc.Col(
-                    [
-
-                    ]
+                    id = 'main-table',
+                    width = {
+                        'size':6
+                    }
                 )
             ],
-            className='g-0'
+            style= {
+                'margin-left': 40
+            }
         )
     ],
     className='dbc'
 )
 
-
 ''' CALLBACKS '''
 
 
 @callback(
+    Output('main-table', 'children'),
+    Output('h5-chosed-product', 'children'),
     Output('h3-chosed-product', 'children'),
     Output('h1-chose', 'children'),
     Output('margin-sales-log', 'figure'),
@@ -461,6 +536,12 @@ def update_fig(picked_code):
             showlegend=True
         )
 
+        sales_fig.add_annotation(
+            x = reprice_date,
+            y = need_to_view_df_reprice['count_sale'].max(),
+            text = 'Переоценка: ' + f'{reprice_date}',
+        )
+
         revenue_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                      y=need_to_view_df_reprice['sum_sale_clean'],
                                      name='Оборот',
@@ -490,6 +571,12 @@ def update_fig(picked_code):
             name='Переоценка: ' + str(
                 reprice_date) + '<br>' + f'\n<b>Код товара: {need_to_view_df_reprice["product_code"].unique()[0]}</b>',
             showlegend=True
+        )
+
+        revenue_fig.add_annotation(
+            x=reprice_date,
+            y=need_to_view_df_reprice['sum_sale_clean'].max(),
+            text='Переоценка: ' + f'{reprice_date}',
         )
 
         margin_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
@@ -524,14 +611,53 @@ def update_fig(picked_code):
             showlegend=True
         )
 
+        margin_fig.add_annotation(
+            x=reprice_date,
+            y=((need_to_view_df_reprice['sum_sale_clean'] - need_to_view_df_reprice['cost_price_clean']) /
+                need_to_view_df_reprice['cost_price_clean']).max(),
+            text='Переоценка: ' + f'{reprice_date}',
+        )
+
     if picked_code is None:
         h1_string = 'Выберете товар'
         h3_string = ''
+        h5_string = ''
+        need_table = html.Div(
+            [
+                html.H2('Для отображения таблицы выберете товар..', className='display-3'),
+                html.Hr(className='my-2')
+            ],
+            className='h-100 p-5 bg-light border rounded-3'
+        )
     else:
-        h1_string = 'Выбрано'
+        h1_string = 'Выбрано:'
         h3_string = str(need_to_view_df["Наименование"].iloc[0])
+        h5_string = 'Код товара: ' + str(need_to_view_df["product_code"].iloc[0])
 
-    return h3_string, h1_string, margin_fig, revenue_fig, sales_fig
+        need_to_view_df = need_to_view_df[['current_price_date',
+                                           'last_price_date',
+                                           'koef_change_sale',
+                                           'koef_change_revenue',
+                                           'koef_change_profit',
+                                           'current_price',
+                                           'last_price',
+                                           'delta_price']]
+        need_to_view_df.drop_duplicates(inplace=True)
+        table_df = pd.DataFrame(
+            {
+                'Переоценка ФЦ ОРП': need_to_view_df['current_price_date'].dt.date,
+                'Выставленная цена': need_to_view_df['current_price'],
+                'Предыдущая переоценка ФЦ ОРП': need_to_view_df['last_price_date'].dt.date,
+                'Предыдущая выставленная цена': need_to_view_df['last_price'],
+                'Изменение цены': need_to_view_df['delta_price'],
+                'КПРОД': need_to_view_df['koef_change_sale'],
+                'КПРИБ': need_to_view_df['koef_change_profit'],
+                'КОБ': need_to_view_df['koef_change_revenue']
+            }
+        )
+        need_table = dbc.Table.from_dataframe(table_df,striped=True, bordered=True, hover = True)
+
+    return need_table,h5_string, h3_string, h1_string, margin_fig, revenue_fig, sales_fig
 
 
 @callback(
