@@ -9,14 +9,12 @@ from datetime import date, datetime
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
-import random
-import plotly.express as px
-
 import plotly.io as poi
 from dash_bootstrap_templates import load_figure_template
 
 load_figure_template("CERULEAN")
 theme = dbc.themes.CERULEAN
+
 
 ''' GET DATA '''
 
@@ -50,6 +48,7 @@ class data_lake():
         self.picked_product = [self.main_df['product_code'].iloc[0]]
         self.picked_koeffs = None
 
+        ''' Штука, которая возвращает список товаров, подходящие под фильтр, заданный пользователем под коэффициенты'''
         filtered_products = self.main_df[['product_id', 'product_code']]
         filtered_products['reprice_flag'] = False
         self.filtered_products_koeffs = filtered_products[['product_code', 'reprice_flag']]
@@ -86,7 +85,6 @@ class data_lake():
         # достаточно неоднозначный для понимания цикл, принцип его работы:
         # Итера
         for koef, tuple_value in self.picked_koeffs.items():
-
             if \
                     (koef is None) \
                             or (tuple_value[0] is None) \
@@ -143,6 +141,7 @@ class data_lake():
 ''' Получение данных, можно настроить вручную, какие датафреймы нужно получать '''
 
 sales_data = data_lake(dict_of_dataframes=get_data())
+
 
 ''' LAYOUT '''
 app = Dash(__name__,

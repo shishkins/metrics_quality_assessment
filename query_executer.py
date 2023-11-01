@@ -3,6 +3,13 @@ import dns_db_resources as db
 import pandas as pd
 import time
 
+
+# Флаг rewrite должен быть True в следующих случаях:
+# - первый запуск дашборда;
+# - обновление данных;
+# - csv файлы пропали
+rewrite = False
+
 def get_fspb_pg_conn() -> db.PostgreSQL:
     connection = db.PostgreSQL(host='adm-fspb-pgrepl.dns-shop.ru',
                                db='dep_spb',
@@ -190,4 +197,5 @@ def csv_execute(period='month', how_long='3', rewrite=True):
 
     os.chdir('..')  # возврат в предыдущую директорию
 
-# csv_execute()
+if __name__ == '__main__':
+    csv_execute(rewrite = rewrite)
