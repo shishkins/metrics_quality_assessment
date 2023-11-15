@@ -8,7 +8,7 @@ import time
 # - первый запуск дашборда;
 # - обновление данных;
 # - csv файлы пропали
-rewrite = False
+rewrite = True
 
 def get_fspb_pg_conn() -> db.PostgreSQL:
     connection = db.PostgreSQL(host='adm-fspb-pgrepl.dns-shop.ru',
@@ -43,10 +43,11 @@ def csv_execute(period='month', how_long='3', rewrite=True):
         return None
 
     pg_conn = get_fspb_pg_conn()
-    ch_conn = get_fspb_ch_conn()
+    # ch_conn = get_fspb_ch_conn()
 
     if not os.path.isdir("csv"):
         os.mkdir("csv") # создание папки с csv файлами, если такой не имеется
+        os.chdir('csv')
     else:
         os.chdir('csv')  # изменяем текущую директорую на папку с csv
         for file in os.listdir():
@@ -67,6 +68,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     cosc.koef_change_sale,
                     cosc.koef_change_revenue,
                     cosc.koef_change_profit,
+                    cosc.koef_var_sale,
+                    cosc.koef_var_revenue,
+                    cosc.koef_var_profit,
                     cosc.current_price,
                     cosc.last_price,
                     cosc.delta_price
@@ -82,6 +86,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     coeff_table.koef_change_sale,
                     coeff_table.koef_change_revenue,
                     coeff_table.koef_change_profit,
+                    coeff_table.koef_var_sale,
+                    coeff_table.koef_var_revenue,
+                    coeff_table.koef_var_profit,
                     coeff_table.current_price,
                     coeff_table.last_price,
                     coeff_table.delta_price,
@@ -128,6 +135,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     sale.koef_change_sale,
                     sale.koef_change_revenue,
                     sale.koef_change_profit,
+                    sale.koef_var_sale,
+                    sale.koef_var_revenue,
+                    sale.koef_var_profit,
                     sum(sale.count_sale) AS count_sale,
                     sum(sale.sum_sale) AS sum_sale,
                     sum(sale.sum_sale_clean) AS sum_sale_clean,
@@ -146,6 +156,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     sale.koef_change_sale,
                     sale.koef_change_revenue,
                     sale.koef_change_profit,
+                    sale.koef_var_sale,
+                    sale.koef_var_revenue,
+                    sale.koef_var_profit,
                     sale.current_price,
                     sale.last_price,
                     sale.delta_price

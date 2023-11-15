@@ -30,31 +30,74 @@ def get_data():
     write_date_df['write_date'] = pd.to_datetime(write_date_df['write_date'])
 
     # расчет некоторых величин
-    koeffs_df = sales_and_coeffs_df[['koef_change_sale','koef_change_revenue','koef_change_profit']].drop_duplicates()
+    koeffs_df = sales_and_coeffs_df[['koef_change_sale','koef_change_revenue','koef_change_profit', 'current_price_date', 'product_code']].drop_duplicates()
 
     indicators_for_coeffs = pd.DataFrame(
         {
-            'koef_change_sale_nulls': [koeffs_df.loc[koeffs_df['koef_change_sale'] == 0, 'koef_change_sale'].count()],
+            'koef_change_sale_nulls': [
+                koeffs_df.loc[
+                    koeffs_df['koef_change_sale'] == 0,
+                    'koef_change_sale'
+                ].count()
+            ],
             'koef_change_revenue_nulls': [
-                koeffs_df.loc[koeffs_df['koef_change_revenue'] == 0, 'koef_change_revenue'].count()],
+                koeffs_df.loc[
+                    koeffs_df['koef_change_revenue'] == 0,
+                    'koef_change_revenue'
+                ].count()
+            ],
             'koef_change_profit_nulls': [
-                koeffs_df.loc[koeffs_df['koef_change_profit'] == 0, 'koef_change_profit'].count()],
-            'all_reprices_count': [koeffs_df.shape[0]]
+                koeffs_df.loc[
+                    koeffs_df['koef_change_profit'] == 0,
+                    'koef_change_profit'
+                ].count()
+            ],
+            'koef_change_sale_nulls_one': [
+                koeffs_df.loc[
+                    (koeffs_df['koef_change_sale'] == 0)
+                    & (koeffs_df['koef_change_profit'] != 0)
+                    & (koeffs_df['koef_change_revenue'] != 0),
+                    'koef_change_sale'
+                ].count()
+            ],
+            'koef_change_revenue_nulls_one': [
+                koeffs_df.loc[
+                    (koeffs_df['koef_change_revenue'] == 0)
+                    & (koeffs_df['koef_change_profit'] != 0)
+                    & (koeffs_df['koef_change_sale'] != 0),
+                    'koef_change_revenue'
+                ].count()
+            ],
+            'koef_change_profit_nulls_one': [
+                koeffs_df.loc[
+                    (koeffs_df['koef_change_profit'] == 0)
+                    & (koeffs_df['koef_change_sale'] != 0)
+                    & (koeffs_df['koef_change_revenue'] != 0),
+                    'koef_change_profit'
+                ].count()
+            ],
+            'all_reprices_count': [
+                koeffs_df.shape[0]
+            ]
         }
     )
 
+
     # Создаем pd.cut объект с интервалами
     params_of_interval = {
-        'min': -100,
-        'max': 300,
-        'step': 25
+        'min': -80,
+        'max': 128,
+        'step': 100,
+        'over_min':-np.inf,
+        'over_max':np.inf
     }
     # создание интервалов
-    array_of_intervals = np.linspace(start=params_of_interval['min'], stop=params_of_interval['max'], num=40)
+    array_of_intervals = np.linspace(start=params_of_interval['min'], stop=params_of_interval['max'], num=params_of_interval['step']) # ручное задание интервалов
+    array_of_intervals = np.concatenate((np.array([params_of_interval['over_min']]), array_of_intervals, np.array([params_of_interval['over_max']])), axis=0)  # с обеих сторон прицепляем "куски" больших интервалов
     array_of_intervals = np.round(array_of_intervals, 2)
-    array_up = array_of_intervals[0:-1]
-    array_down = array_of_intervals[1::]
-    bins = pd.IntervalIndex.from_arrays(array_up, array_down)
+    array_up = array_of_intervals[0:-1]  #создание массива верхних значений интервалов
+    array_down = array_of_intervals[1::]  # создание массива нижних значений интервалов
+    bins = pd.IntervalIndex.from_arrays(array_up, array_down)  #фокус-покус, два массива превратились в IntervalIndex
 
     # считает количество вхождений каждого коэффициента в каждый бин, созданный выше
     sales = pd.cut(x=koeffs_df.loc[koeffs_df['koef_change_sale'] != 0, 'koef_change_sale'], bins=bins)
