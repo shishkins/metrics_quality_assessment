@@ -22,7 +22,7 @@ from get_allocation_koeffs import calculate_allocation_koeffs
 # import locale
 # locale.setlocale(locale.LC_ALL, 'ru_RU.utf8')
 
-# для визуала
+# для визуала test
 def russian_date(date):
     month_list = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
                   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
