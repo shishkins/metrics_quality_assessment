@@ -22,7 +22,7 @@ from get_allocation_koeffs import calculate_allocation_koeffs
 # import locale
 # locale.setlocale(locale.LC_ALL, 'ru_RU.utf8')
 
-# для визуала test
+# для визуала
 def russian_date(date):
     month_list = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
                   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
@@ -165,7 +165,6 @@ class data_lake():
                 severed_df = severed_df.merge(self.picked_reprices_dates, on='current_price_date')
 
         severed_df.sort_values(by='date', inplace=True)
-        print(severed_df.columns)
 
         return severed_df
 
@@ -1055,7 +1054,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
@@ -1078,7 +1077,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
@@ -1099,7 +1098,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
@@ -1175,7 +1174,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
@@ -1198,7 +1197,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
@@ -1218,7 +1217,7 @@ def draw_figures(df):
             opacity=opacity,
             font=dict(
                 family=font_style_annotations,
-                size=font_size_annotations,
+                size=list_of_fontsizes[count_reprices-1],
                 color=color_text_annotations
             ),
             bgcolor=bgcolor,
