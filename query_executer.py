@@ -2,6 +2,9 @@ import os
 import dns_db_resources as db
 import pandas as pd
 import time
+from calculate_t_test import calculate_t_test_with_mean, t_test_for_reprice
+from calculate_rolling_metrics import calculate_mean, calculate_k_vars
+from get_dataframes import get_data
 
 
 # Флаг rewrite должен быть True в следующих случаях:
@@ -102,10 +105,10 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                             THEN sale."Продажа" / sale."Количество"
                         ELSE sale."Продажа"
                     END AS sum_sale,
-                    CASE 
+                    CASE  
                         WHEN korp."ВидКонтрагента" = 'Организация' OR korp."ВидКонтрагента" = 'ЧастноеЛицо'
-                            THEN (sale."Продажа" - sale."СуммаНДС") / sale."Количество"
-                        ELSE sale."Продажа" - sale."СуммаНДС"
+                            THEN (sale."Продажа" - sale."СуммаНДС" + sale."Скидка"/1.2) / sale."Количество"
+                        ELSE sale."Продажа" - sale."СуммаНДС" + sale."Скидка"/1.2
                     END AS sum_sale_clean,
                     CASE 
                         WHEN korp."ВидКонтрагента" = 'Организация' OR korp."ВидКонтрагента" = 'ЧастноеЛицо'
@@ -122,13 +125,13 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                                         AND coeff_table.current_price_date + coeff_table.periodic*INTERVAL '1 day' + INTERVAL '1 day'
                 WHERE
                     sale."Period" BETWEEN '2023-01-01' AND current_date
-                    AND sale."Количество" > 0
+                    AND sale."Количество" > 0  
                     AND sale."Контрагент" != '9b983a73-59e3-11eb-a20f-00155df1b805'
                     AND sale."Recorder_type" = 'DocumentRef.РасходнаяНакладная'
             ), full_sale AS (
                 SELECT
                     sale.product_id,
-                    sale.sale_date,
+                    sale.sale_date, 
                     sale.current_price_date,
                     sale.last_price_date,
                     sale.periodic,
@@ -168,7 +171,9 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                     prod."Категория" as category_id,
                     prod."Код" as product_code,
                     prod."Наименование",
-                    COALESCE(full_sale.count_sale, 0.01) / COALESCE(seasonality."WeekSeasonalFactor", 1) :: float AS clean_count_sale --очищаем продажи от недельной сезонности--
+                    COALESCE(full_sale.count_sale, 0.01) / COALESCE(seasonality."WeekSeasonalFactor", 1) :: float AS clean_count_sale, --очищаем продажи от недельной сезонности--
+                    COALESCE(full_sale.sum_sale_clean, 0.01) / COALESCE(seasonality."WeekSeasonalFactor", 1) :: float AS fact_revenue_clean,
+                    COALESCE((full_sale.sum_sale_clean - full_sale.cost_price_clean) , 0.01) / COALESCE(seasonality."WeekSeasonalFactor", 1) :: float AS fact_profit_clean
                 FROM 
                     full_sale
                 LEFT JOIN data_lake.dim_products AS prod
@@ -189,7 +194,33 @@ def csv_execute(period='month', how_long='3', rewrite=True):
                 COALESCE(name_4,name_3,name_2,name_1) AS category_name
             FROM 
                 mart_metric.category_dim_hierarchy
-            '''
+            ''',
+        'algorithms_reprices': '''
+            SELECT 
+                date(pricing."date" + INTERVAL '1 day') AS current_price_date,
+                pricing.product_id AS product_id,
+                pt.type_name AS algorithm_name,
+                pt.type_id AS algorithm_id
+            FROM 
+                pricing_api.pricing_final AS pricing
+            LEFT JOIN 
+                pricing_api.pricing_types AS pt 
+                ON pt.type_id = pricing.algorithm 
+        ''',
+        'assortment_status_products': '''
+            SELECT
+                prod."Код" AS product_code,
+                prod."Ссылка" AS product_id,
+                CASE prod."Ассортиментный_Статус" 
+                    WHEN 'Базовый' THEN 'A'
+                    WHEN 'ИнтернетФедеральный' THEN 'C'
+                    WHEN 'ИнтернетРегиональный' THEN 'D'
+                    WHEN 'Дополнительный' THEN 'B'
+                END AS class_product
+            FROM 
+                data_lake.dim_products AS prod
+            WHERE prod."Ассортиментный_Статус" IN ('Базовый','ИнтернетФедеральный','ИнтернетРегиональный','Дополнительный')
+        ''',
     }
 
     if rewrite:
@@ -207,8 +238,25 @@ def csv_execute(period='month', how_long='3', rewrite=True):
         #датафрейм, содержащий дату последней записи данных
         write_date = pg_conn.execute_to_df(query='''SELECT NOW() as write_date''')
         write_date.to_csv(os.getcwd() + '\write_date.csv', index_label=False)
+        print(f'Выполняется расчёт Т-теста для данных')
 
-    os.chdir('..')  # возврат в предыдущую директорию
+        os.chdir('..') # возврат в предыдущую директорию
+        start_time_t_test = time.time()
+        t_test = calculate_t_test_with_mean(get_data()['sales_and_coeffs_df'])
+        start_time_k_metrics = time.time()
+        print(f'Т-тест посчитан, рассчитываются метрики со скользящим средним, время выполнения T-теста: {round(start_time_k_metrics-start_time_t_test,2)}')
+        k_metrics = calculate_mean(get_data()['sales_and_coeffs_df'])
+        end_time_k_metrics = time.time()
+        print(f'Метрики со скользящим средним посчитаны, время выполнения: {round(end_time_k_metrics-start_time_k_metrics,2)}')
+        os.chdir('csv')
+
+        t_test.to_csv(os.getcwd() + '\\t_test_results.csv', index_label=False)
+        end_time_t_test_save = time.time()
+        print(f'Результаты Т-теста сохранены, время сохранения: {round(end_time_t_test_save-end_time_k_metrics,2)}')
+        k_metrics.to_csv(os.getcwd() + '\\k_metrics_new.csv', index_label=False)
+        end_time_k_metrics_save = time.time()
+        print(f'Результаты метрик со скользящим средним сохранены, время сохранения: {round(end_time_k_metrics_save - end_time_t_test_save,2)}')
+        os.chdir('..')
 
 if __name__ == '__main__':
     csv_execute(rewrite = rewrite)

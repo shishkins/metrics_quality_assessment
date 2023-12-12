@@ -1,9 +1,10 @@
 # Импортирование библиотек
-
+import os
 import warnings
 
 warnings.filterwarnings('ignore')
 from dash import Dash, html, dash_table, dcc, callback, Output, Input
+import dash
 
 from datetime import date, datetime
 import dash_bootstrap_components as dbc
@@ -16,6 +17,9 @@ from dash_bootstrap_templates import load_figure_template
 from query_executer import csv_execute
 from get_dataframes import get_data
 from get_allocation_koeffs import calculate_allocation_koeffs
+from draw_t_test_diagram import calculate_sunburst
+
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 
 # # Вывод русских дат
@@ -33,6 +37,18 @@ def russian_date(date):
 
 load_figure_template("minty_dark")
 theme = dbc.themes.MINTY
+theme_colors = {
+    'active': '#E5E5E5',
+    'default': '#FFFFFF',
+    'primary': '#78C2AD',
+    'secondary': '#F3969A',
+    'success': '#56CC9D',
+    'danger': '#FF7851',
+    'warning': '#FFCE67',
+    'info': '#6CC3D5',
+    'light': '#F8F9FA',
+    'dark': '#343A40'
+}
 
 ''' GET DATA '''
 
@@ -63,6 +79,8 @@ class data_lake():
         self.picked_product = None
         self.picked_koeffs = None
         self.picked_reprices_dates = None
+        self.picked_brand = self.assortment_status_products_df
+        self.picked_price = self.main_df[['product_code', 'current_price']].drop_duplicates()
 
         ''' Штука, которая возвращает список товаров, подходящие под фильтр, заданный пользователем под коэффициенты'''
         filtered_products = self.main_df[['product_id', 'product_code', 'current_price_date', 'category_id']]
@@ -135,11 +153,34 @@ class data_lake():
                                                    'reprice_flag',
                                                    'category_id']]  # записываем в переменную класса датафрейм с товарами, у которых появился reprice_flag = True
 
+    def filter_brand(self, brands):
+        if len(brands) >1 :
+            need_brands = pd.DataFrame(
+                {
+                    'class_product': brands[1:-1] + [brands[-1]]
+                }
+            )
+            self.picked_brand = self.assortment_status_products_df.merge(need_brands, on = 'class_product')
+        else:
+            self.picked_brand = self.assortment_status_products_df
+
+    def filter_price(self, prices):
+        filtered_prices = self.main_df[['current_price', 'product_code']].drop_duplicates()
+        filtered_prices = filtered_prices.loc[(filtered_prices['current_price'] >= prices[0]) & (filtered_prices['current_price'] <= prices[1])]
+        self.picked_price = filtered_prices
+
+
     def get_list_products(self):
+        '''
+        Функция, возвращающая список доступных товаров
+        '''
         severed_product = self.filtered_products_koeffs[:]
         severed_product = severed_product.merge(self.filtered_hierarchy_df, on='category_id')[['product_code',
                                                                                                'current_price_date',
                                                                                                'reprice_flag']].drop_duplicates()
+        severed_product = severed_product.merge(self.picked_brand, on = 'product_code').drop_duplicates()
+        severed_product = severed_product.merge(self.picked_price, on = 'product_code').drop_duplicates()
+        severed_product = severed_product.reset_index().drop_duplicates(subset = ['current_price_date', 'product_code'])
         return severed_product
 
     # def filter_hierarchy(self, filter_df):
@@ -154,7 +195,7 @@ class data_lake():
 
         severed_df = df
         severed_df = severed_df.loc[severed_df['product_code'] == self.picked_product]
-        severed_df = severed_df.merge(self.filtered_products_koeffs, on=['product_code', 'current_price_date'],
+        severed_df = severed_df.merge(self.get_list_products(), on=['product_code','product_id','current_price','current_price_date'],
                                       how='left')
 
         # проверяем, кто вызывает функцию, чтобы не отдать то, чего не нужно
@@ -163,7 +204,6 @@ class data_lake():
                 severed_df = severed_df
             else:
                 severed_df = severed_df.merge(self.picked_reprices_dates, on='current_price_date')
-
         severed_df.sort_values(by='date', inplace=True)
 
         return severed_df
@@ -190,6 +230,12 @@ def sort_hierarchy(list_category):
             list_of_keys.append(i+len(list_category))
 
     return list_of_keys
+
+def hex_to_rgba(h, alpha):
+    '''
+    превращает hex значение цвета в rgb tuple со значением alpha = непрозрачности
+    '''
+    return tuple([int(h.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)] + [alpha])
 
 
 ''' Front-end '''
@@ -239,7 +285,7 @@ def draw_allocation(koeff_counts, indicator_for_coeffs):
 
 
 ''' Задание графических объектов '''
-
+#тест
 navbar = dbc.Navbar(
     dbc.Container(
         [
@@ -352,6 +398,37 @@ koeffs_hist_graph = dbc.Card(
                 ),
                 dbc.Row(
                     [
+                        html.H4(children='Диаграммы распределения т-теста',
+                                className='card-title'),
+                        html.P([
+                            'Т-тест рассчитывается отдельно от метрики. Для просмотра интересующей Вас группы нажмите на неё',
+                            html.Br(),
+                            'Для просмотра распределения интересующей группы товаров обновите график, нажав кнопку выше'
+                        ],
+                            className='card-text'),
+                    ]
+                ),
+                dbc.Row(
+                    children=[],
+                    id='t-test-graphs',
+                ),
+                dbc.Row(
+                    html.P(
+                        [
+                            '\U0001F44D' + ' - переоценка вверх (например: 20999 руб. -> 21299 руб.)',
+                            html.Br(),
+                            '\U0001F44E' + ' - переоценка вниз (например: 21299 руб. -> 20999 руб.)',
+                            html.Br(),
+                            '\U0000274C' + ' - эффект отрицательный (например: переоценка вверх уменьшила продажи это: ' + '\U0001F44D'+'\U0000274C' + ')',
+                            html.Br(),
+                            '\U00002705' + ' - эффект положительный (например: переоценка вниз увеличила оборот это: ' + '\U0001F44E'+'\U00002705' + ')',
+                            html.Br(),
+                            '\U00002754' + ' - либо эффект неизвестен, либо переоценка ничего не изменила (например: ' + '\U0001F44D'+'\U00002754' + ')'
+                        ]
+                    )
+                ),
+                dbc.Row(
+                    [
                         dbc.Col(
                             [
                                 html.Div(
@@ -370,6 +447,52 @@ koeffs_hist_graph = dbc.Card(
             ]
         )
     ],
+)
+
+koeffs_new_hist_graph = dbc.Card(
+    [
+        dbc.CardBody(
+            [
+                html.H4(children='Распределение коэффициентов (новая метрика) по интервалам, не включая нулевые значения', className='card-title'),
+                html.P([
+                    'При фильтрации товаров в карточке слева происходит и фильтрация данного визуального элемента.',
+                    html.Br(),
+                    'Для просмотра распределения интересующей группы товаров обновите график'
+                ],
+                    className='card-text'),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dcc.Graph(id='koeffs_new_hist',
+                                          className='dbc')
+                            ]
+                        )
+                    ]
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                html.Div(
+                                    [
+                                    ],
+                                    id = 'table-new-allocation'
+                                )
+                            ],
+                            width={
+                                'size': 12,
+                                'order': 1
+                            }
+                        )
+                    ]
+                )
+            ]
+        )
+    ],
+    style = {
+        'margin-top' : 20
+    }
 )
 
 
@@ -456,6 +579,34 @@ hierarchy_elem = dbc.Card(
     style={
         'margin-bottom': 20
     }
+)
+
+brand_choiser = dbc.Card(
+    [
+        dbc.CardBody(
+            [
+                html.H4('Статус товара', className='card-title'),
+                html.P('Выберете ассортиментный статус товара',
+                       className=' card-text'),
+                dbc.Checklist(
+                    options=[
+                        {
+                            'label': f'{i}',
+                            'value': i
+                        } for i in
+                        sorted(sales_data.assortment_status_products_df[
+                                   'class_product'].unique())
+                    ],
+                    value=[None],
+                    id='brand-choice',
+                    className="btn-inline-group",
+                    inputClassName="btn-check",
+                    labelClassName="btn btn-outline-primary",
+                    inline=False
+                )
+            ]
+        )
+    ]
 )
 
 value_koeff_filter = html.Div(
@@ -632,7 +783,50 @@ value_koeff_filter = html.Div(
                                 'margin-top': 10
                             }
                         )
-                    ]
+                    ],
+                    width = {
+                        'size':12
+                    }
+                ),
+                dbc.Col(
+                    [
+                        dbc.Card(
+                            [
+                                dbc.CardBody(
+                                    [
+                                        html.H4(children='Цена', className='card-title'),
+                                        html.P(
+                                            'Выберете, товары с какой ценой вас интересуют: ',
+                                            className='card-text'
+                                        ),
+                                        html.Div(
+                                            [
+                                                dbc.Input(value=sales_data.main_df['current_price'].min(), id = 'range-price-left', type='number'),
+                                                dcc.RangeSlider(
+                                                    id='range-slider-price',
+                                                    min=sales_data.main_df['current_price'].min(),
+                                                    max=sales_data.main_df['current_price'].max(),
+                                                    value=[sales_data.main_df['current_price'].min(), sales_data.main_df['current_price'].max()],
+                                                    allowCross=False,
+                                                    tooltip={"placement": "bottom", "always_visible": True},
+                                                    marks = None,
+                                                    step = 1
+                                                ),
+                                                dbc.Input(value=sales_data.main_df['current_price'].max(), id = 'range-price-right', type='number')
+                                            ],
+                                            style={"display": "grid", "grid-template-columns": "12% 76% 12%"}
+                                        ),
+                                    ]
+                                )
+                            ],
+                        )
+                    ],
+                    width={
+                        'size': 12
+                    },
+                    style = {
+                        'margin-bottom': 10
+                    }
                 )
             ]
         ),
@@ -642,10 +836,29 @@ value_koeff_filter = html.Div(
                     [
                         dbc.Col(
                             [
-                                hierarchy_elem,
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            [
+                                                hierarchy_elem
+                                            ],
+                                            width = {
+                                                'size': 8
+                                            }
+                                        ),
+                                        dbc.Col(
+                                            [
+                                                brand_choiser
+                                            ],
+                                            width = {
+                                                'size':4
+                                            }
+                                        )
+                                    ]
+                                ),
                                 product_filter_list,
                             ],
-                            width={'size': 8}
+                            width={'size': 12}
                         ),
                         dbc.Label(
                             children='Код товара',
@@ -735,6 +948,7 @@ value_koeff_filter = html.Div(
 app.layout = html.Div(
     [
         navbar,
+        html.Div(children='', id = 'empty-elem'),
         dbc.Row(
             [
                 dbc.Col(
@@ -742,7 +956,7 @@ app.layout = html.Div(
                         value_koeff_filter  # карточка фильтрации для выбора товара
                     ],
                     width={
-                        'size': 4,
+                        'size': 3,
                         'offset': 0,
                     },
                     style = {
@@ -751,10 +965,11 @@ app.layout = html.Div(
                 ),
                 dbc.Col(
                     [
-                        koeffs_hist_graph  # График распределения коэффициентов
+                        koeffs_hist_graph,  # График распределения коэффициентов
+                        koeffs_new_hist_graph
                     ],
                     width={
-                        'size': 7,
+                        'size': 8,
                         'offset': 0
                     },
                     style={
@@ -780,38 +995,64 @@ app.layout = html.Div(
                                'margin-left': 40,
                                'margin-top:': 5}
                         ),
-                dbc.Col(
+                dbc.Row(
                     [
-                        html.Div(
+                        dbc.Col(
+                            [
+                                html.Div(
+                                    children=[
+
+                                    ],
+                                    id='h5-chosed-product',  # Код товара с кнопкой буффера обмена
+                                    style={'margin-bottom': 10,
+                                           'margin-left': 40,
+                                           'margin-top:': 5}
+                                ),
+                                html.Div(
+                                    id='main-table',
+                                    children = []
+                                )
+                            ],
+                            width={
+                                'size': 10
+                            }
+                        )
+                    ]
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            html.Div(
+                                id='graphs',  # интерактивно-генерирующиеся графики
+                                children=[]
+                            ),
+                            width = {
+                                'size': 5,
+                                'order': 2
+                            }
+                        ),
+                        dbc.Col(
+                            html.Div(
+                                id='graphs-new',  # интерактивно-генерирующиеся графики
+                                children=[]
+                            ),
+                            width = {
+                                'size': 5,
+                                'order': 3
+                            }
+                        ),
+                        dbc.Col(
                             children=[
 
                             ],
-                            id='h5-chosed-product',  # Код товара с кнопкой буффера обмена
-                            style={'margin-bottom': 10,
-                                   'margin-left': 40,
-                                   'margin-top:': 5}
-                        ),
-                        html.Div(
-                            id='main-table',
-                        ),
-                        html.Div(
-                            id='graphs',  # интерактивно-генерирующиеся графики
-                            children=[]
+                            id='place-for-reprices-choiser',
+                            className="radio-group",
+                            width={
+                                'size': 1,
+                                'order': 'first'
+                            }
                         )
-                    ],
-                    width={
-                        'size': 7
-                    }
-                ),
-                dbc.Col(
-                    children=[
-
-                    ],
-                    id='place-for-reprices-choiser',
-                    className="radio-group",
-                    width={
-                        'size': 2
-                    }
+                    ]
                 )
             ],
             style={
@@ -826,27 +1067,66 @@ app.layout = html.Div(
 
 
 def draw_figures(df):
-    need_to_view_df = df
+    need_to_view_df = df.drop_duplicates()
+
     sales_fig = go.Figure()  # создание фигуры с продажами
     revenue_fig = go.Figure()  # создание фигуры с оборотом
     profit_fig = go.Figure()  # создание фигуры с маржой
+    koeffs_var_fig = go.Figure() # создание фигуры с коэффициентами вариации
 
     revenue_fig.update_layout(xaxis={'type': 'date'})
     sales_fig.update_layout(xaxis={'type': 'date'})
+
     # задание параметров для рисунков
     count_reprices = len(need_to_view_df['current_price_date'].dt.date.unique())
     font_size_annotations = 16
     font_style_annotations = 'Arial,sans-serif'
-    color_text_annotations = '#b8b4b4'
-    bgcolor = '#1d2024'
-    border_color = '#c7c7c7'
+    color_text_annotations = '#ECEEEF'
+    bgcolor = '#272B2F'
+    border_color = '#474A4E'
     offset_top = 1.18
     list_of_fontsizes = [16,14,13,12,10,8]  # шрифты при различном количестве переоценок
     if count_reprices> len(list_of_fontsizes):
         list_of_fontsizes += [list_of_fontsizes[-1]]*(count_reprices-len(list_of_fontsizes))  # добавляет в список последний элемент n раз, где n - разница между количеством переоценок и длиной списка размера шрифтов list_of_fontsizes
 
+    # stock_fig = go.Figure()
+    # stock_path = f'stock_logs/stock_{int(need_to_view_df["product_code"].unique()[0])}.csv'
+    # flag_draw_stock = os.path.exists(stock_path)
+    # flag_product = not sales_data.picked_product is None
+    # reprice_date = date(2023,8,30)
+    # if flag_draw_stock and flag_product:
+    #     stock_df = pd.read_csv(stock_path)
+    #     stock_df['date'] = pd.to_datetime(stock_df['date'])
+    #     need_to_view_df_reprice = need_to_view_df.loc[need_to_view_df['current_price_date'].dt.date == reprice_date]
+    #     stock_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+    #                                y=stock_df['stock_amount'],
+    #                                name='Остаток',
+    #                                mode='lines+markers',
+    #                                hovertemplate='<b>Количество: %{y}' +
+    #                                              '<br>Дата: %{x}',
+    #                                line = dict(color = '#E67E22'),
+    #                                showlegend=True
+    #     )
+    #     stock_fig.add_shape(
+    #         type="line",
+    #         x0=reprice_date,
+    #         y0=0,
+    #         x1=reprice_date,
+    #         y1=stock_df['stock_amount'].max(),
+    #         line=dict(
+    #             dash="dash",
+    #             color=theme_colors['danger']
+    #         ),
+    #         legendgroup=str(reprice_date),
+    #         name='Переоценка: '
+    #              + '<br>'
+    #              + str(reprice_date),
+    #         showlegend=False
+    #     )
+    #     stock_fig.add_trace(stock_scatter)
+
     # Код ниже отрисовывает графики
-    for reprice_date in need_to_view_df['current_price_date'].dt.date.unique():
+    for i,reprice_date in enumerate(need_to_view_df['current_price_date'].dt.date.unique()):
 
         need_to_view_df_reprice = need_to_view_df.loc[
             need_to_view_df['current_price_date'].dt.date == reprice_date]  # находим конкретную переоценку
@@ -863,19 +1143,21 @@ def draw_figures(df):
                                    mode='lines+markers',
                                    hovertemplate='<b>Количество: %{y}' +
                                                  '<br>Дата: %{x}',
-                                   legendgroup=str(reprice_date),
-                                   opacity=opacity)
+                                   opacity=opacity,
+                                   showlegend = i ==0,
+                                   line = dict(color = theme_colors['warning']))
         clean_count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                          y=need_to_view_df_reprice['clean_count_sale'],
-                                         name='Очищенные продажи',
+                                         name='Очищенные' + '<br>продажи',
                                          mode='lines+markers',
                                          hovertemplate='<b>Количество: %{y}' +
                                                        '<br>Дата: %{x}',
-                                         legendgroup=str(reprice_date),
-                                         showlegend=True,
-                                         opacity=opacity)
+                                         showlegend=i ==0,
+                                         opacity=opacity,
+                                         line = dict(color = theme_colors['success']))
         sales_fig.add_trace(count_scatter)
         sales_fig.add_trace(clean_count_scatter)
+        # sales_fig.add_trace(rolling_count_scatter)
         # sales_fig.update_layout(hoverlabel_font={'size': 16},
         #                         font_size=20)
 
@@ -901,14 +1183,15 @@ def draw_figures(df):
             x1=reprice_date,
             y1=max_value_sale_reprice,
             line=dict(
-                dash="dash"
+                dash="dash",
+                color = theme_colors['danger']
             ),
             opacity=opacity,
             legendgroup=str(reprice_date),
             name='Переоценка: '
                  + '<br>'
                  + str(reprice_date),
-            showlegend=True
+            showlegend=False
         )
 
         # Подсказка (текст над вертикальной линией  - "переоценка: .."
@@ -918,7 +1201,13 @@ def draw_figures(df):
             text='Переоценка: ' +
                  '<br>' +
                  f'{reprice_date}',
-            opacity=opacity
+            opacity=opacity,
+            font= dict(
+                color = theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            ),
+            arrowcolor= theme_colors['danger']
         )
 
         # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
@@ -996,8 +1285,9 @@ def draw_figures(df):
                                      hovertemplate='<b>Сумма: %{y}' +
                                                    '<br>Дата: %{x}',
                                      text='Код товара: ' + need_to_view_df_reprice['product_code'],
-                                     legendgroup=str(reprice_date),
-                                     opacity=opacity)
+                                     opacity=opacity,
+                                     line = dict(color = theme_colors['info']),
+                                     showlegend= i == 0)
 
         revenue_fig.add_trace(revenue_scatter)
         # revenue_fig.update_layout(hoverlabel_font={'size': 16},
@@ -1020,13 +1310,14 @@ def draw_figures(df):
             x1=reprice_date,
             y1=max_value_revenue_reprice,
             line=dict(
-                dash="dash"
+                dash="dash",
+                color = theme_colors['danger']
             ),
             opacity=opacity,
             legendgroup=str(reprice_date),
             name='Переоценка: ' +
                  str(reprice_date),
-            showlegend=True
+            showlegend=False
         )
 
         # Подсказка, вертикальная линия
@@ -1036,7 +1327,12 @@ def draw_figures(df):
             text='Переоценка: ' +
                  '<br>' +
                  f'{reprice_date}',
-            opacity=opacity
+            opacity=opacity,
+            font=dict(
+                color=theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            )
         )
 
         # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
@@ -1117,6 +1413,8 @@ def draw_figures(df):
         min_value_profit = min(list(need_to_view_df['sum_sale_clean'] - need_to_view_df['cost_price_clean']),
                                key=lambda x: x + abs(x) * 10)  # минимальное значение Y на графике для товара
 
+
+
         profit_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
                                     y=need_to_view_df_reprice['sum_sale_clean'] - need_to_view_df_reprice[
                                         'cost_price_clean'],
@@ -1126,8 +1424,9 @@ def draw_figures(df):
                                     hovertemplate='<b>Сумма: %{y}' +
                                                   '<br>Дата: %{x}',
                                     text='Код товара: ' + need_to_view_df_reprice['product_code'],
-                                    legendgroup=str(reprice_date),
-                                    opacity=opacity)
+                                    opacity=opacity,
+                                    line = dict(color = theme_colors['danger']),
+                                    showlegend= i ==0)
 
         profit_fig.add_trace(profit_scatter)
 
@@ -1138,14 +1437,15 @@ def draw_figures(df):
             x1=reprice_date,
             y1=max_value_profit_reprice,
             line=dict(
-                dash="dash"
+                dash="dash",
+                color = theme_colors['danger']
             ),
             opacity=opacity,
             legendgroup=str(reprice_date),
             name='Переоценка: ' +
                  '<br>' +
                  str(reprice_date),
-            showlegend=True
+            showlegend=False
         )
 
         profit_fig.add_annotation(
@@ -1156,7 +1456,12 @@ def draw_figures(df):
             text='Переоценка: '
                  + '<br>'
                  + f'{reprice_date}',
-            opacity=opacity
+            opacity=opacity,
+            font=dict(
+                color=theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            )
         )
 
         # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
@@ -1225,10 +1530,597 @@ def draw_figures(df):
             borderpad=4,
         )
 
+        koeff_var_sales = go.Bar(x=pd.Series(reprice_date),
+                                 y=need_to_view_df_reprice['koef_var_sale'],
+                                 name='Коэфф. вар. продаж',
+                                 hovertemplate='<b>Значение: %{y}' +
+                                               '<br>Переоценка: %{x}',
+                                 opacity=opacity,
+                                 showlegend=i == 0,
+                                 marker_color=theme_colors['success'])
+        koeff_var_profit = go.Bar(x=pd.Series(reprice_date),
+                                  y=need_to_view_df_reprice['koef_var_profit'],
+                                  name='Коэфф. вар. прибыли',
+                                  hovertemplate='<b>Значение: %{y}' +
+                                                '<br>Переоценка: %{x}',
+                                  opacity=opacity,
+                                  showlegend=i == 0,
+                                  marker_color=theme_colors['danger'])
+        koeff_var_revenue = go.Bar(x=pd.Series(reprice_date),
+                                   y=need_to_view_df_reprice['koef_var_revenue'],
+                                   name='Коэфф. вар. оборота',
+                                   hovertemplate='<b>Значение: %{y}' +
+                                                 '<br>Переоценка: %{x}',
+                                   opacity=opacity,
+                                   showlegend=i == 0,
+                                   marker_color=theme_colors['info']
+                                   )
+        koeffs_var_fig.add_trace(koeff_var_sales)
+        koeffs_var_fig.add_trace(koeff_var_profit)
+        koeffs_var_fig.add_trace(koeff_var_revenue)
+        koeffs_var_fig.update_layout(barmode = 'stack')
+
+    # sales_fig.update_traces(line = dict(color = '#56CC9D'))
+
+
     # формируем список из графиков, который затем преобразуется в список dbc.Элементов. Этот список "воткнется" в html.Div(children = "сюда")
     list_of_figs = [('График изменения продаж', sales_fig),
+                    # ('График изменения остатка', stock_fig),
                     ('График изменения прибыли', profit_fig),
-                    ('График изменения оборота', revenue_fig)]
+                    ('График изменения оборота', revenue_fig),
+                    ('График изменения коэффициентов вариации', koeffs_var_fig)]
+    list_of_graphs = []
+
+    for name, fig in list_of_figs:
+        list_of_graphs.append(
+            dbc.Card(
+                [
+                    dbc.CardHeader(
+                        children=name
+                    ),
+                    dcc.Graph(figure=fig,
+                              className='dbc')
+                ]
+            )
+        )
+
+    return list_of_graphs
+
+
+def draw_figures_new(df):
+    need_to_view_df = df.drop_duplicates()
+
+    sales_fig = go.Figure()  # создание фигуры с продажами
+    revenue_fig = go.Figure()  # создание фигуры с оборотом
+    profit_fig = go.Figure()  # создание фигуры с маржой
+    koeffs_var_fig = go.Figure() # создание фигуры с коэффициентами вариации
+
+    revenue_fig.update_layout(xaxis={'type': 'date'})
+    sales_fig.update_layout(xaxis={'type': 'date'})
+
+    # задание параметров для рисунков
+    count_reprices = len(need_to_view_df['current_price_date'].dt.date.unique())
+    font_size_annotations = 16
+    font_style_annotations = 'Arial,sans-serif'
+    color_text_annotations = '#ECEEEF'
+    bgcolor = '#272B2F'
+    border_color = '#474A4E'
+    offset_top = 1.18
+    list_of_fontsizes = [16,14,13,12,10,8]  # шрифты при различном количестве переоценок
+    if count_reprices> len(list_of_fontsizes):
+        list_of_fontsizes += [list_of_fontsizes[-1]]*(count_reprices-len(list_of_fontsizes))  # добавляет в список последний элемент n раз, где n - разница между количеством переоценок и длиной списка размера шрифтов list_of_fontsizes
+
+    # stock_fig = go.Figure()
+    # stock_path = f'stock_logs/stock_{int(need_to_view_df["product_code"].unique()[0])}.csv'
+    # flag_draw_stock = os.path.exists(stock_path)
+    # flag_product = not sales_data.picked_product is None
+    # reprice_date = date(2023,8,30)
+    # if flag_draw_stock and flag_product:
+    #     stock_df = pd.read_csv(stock_path)
+    #     stock_df['date'] = pd.to_datetime(stock_df['date'])
+    #     need_to_view_df_reprice = need_to_view_df.loc[need_to_view_df['current_price_date'].dt.date == reprice_date]
+    #     stock_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+    #                                y=stock_df['stock_amount'],
+    #                                name='Остаток',
+    #                                mode='lines+markers',
+    #                                hovertemplate='<b>Количество: %{y}' +
+    #                                              '<br>Дата: %{x}',
+    #                                line = dict(color = '#E67E22'),
+    #                                showlegend=True
+    #     )
+    #     stock_fig.add_shape(
+    #         type="line",
+    #         x0=reprice_date,
+    #         y0=0,
+    #         x1=reprice_date,
+    #         y1=stock_df['stock_amount'].max(),
+    #         line=dict(
+    #             dash="dash",
+    #             color=theme_colors['danger']
+    #         ),
+    #         legendgroup=str(reprice_date),
+    #         name='Переоценка: '
+    #              + '<br>'
+    #              + str(reprice_date),
+    #         showlegend=False
+    #     )
+    #     stock_fig.add_trace(stock_scatter)
+
+    # Код ниже отрисовывает графики
+    for i,reprice_date in enumerate(need_to_view_df['current_price_date'].dt.date.unique()):
+
+        need_to_view_df_reprice = need_to_view_df.loc[
+            need_to_view_df['current_price_date'].dt.date == reprice_date]  # находим конкретную переоценку
+
+        # if need_to_view_df_reprice[
+        #     'reprice_flag'].unique() == True:  # задание параметра прозрачности в зависимости от выбранных параметров коэффициентов
+        #     opacity = 0.9
+        # else:
+        #     opacity = 0.3
+
+        count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                   y=need_to_view_df_reprice['clean_count_sale'],
+                                   name='Очищенные' +'<br>' + 'продажи',
+                                   mode='lines+markers',
+                                   hovertemplate='<b>Количество: %{y}' +
+                                                 '<br>Дата: %{x}',
+                                   opacity=0.5,
+                                   showlegend = i ==0,
+                                   line = dict(color = theme_colors['success']))
+        rolling_count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                   y=need_to_view_df_reprice['clean_count_sale_mean'],
+                                   name='Очищенные' +'<br>' + 'продажи' + '<br>' + 'скл. ср.',
+                                   mode='lines+markers',
+                                   hovertemplate='<b>Количество: %{y}' +
+                                                 '<br>Дата: %{x}',
+                                   opacity=1,
+                                   showlegend = i ==0,
+                                   line = dict(color = theme_colors['warning']))
+        # clean_count_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+        #                                  y=need_to_view_df_reprice['clean_count_sale'],
+        #                                  name='Очищенные' + '<br>продажи',
+        #                                  mode='lines+markers',
+        #                                  hovertemplate='<b>Количество: %{y}' +
+        #                                                '<br>Дата: %{x}',
+        #                                  showlegend=i ==0,
+        #                                  opacity=opacity,
+        #                                  line = dict(color = theme_colors['success']))
+        sales_fig.add_trace(count_scatter)
+        # sales_fig.add_trace(clean_count_scatter)
+        sales_fig.add_trace(rolling_count_scatter)
+        # sales_fig.update_layout(hoverlabel_font={'size': 16},
+        #                         font_size=20)
+
+        # Добавляем примочки в виде пояснительных штук:
+        # Вертикальная линия в дату переоценки
+        # максимальные ограничения для подсказок на графике
+        max_value_sale_reprice = max(list(need_to_view_df_reprice['clean_count_sale']),
+                                     key=lambda x: abs(
+                                         x))  # максимальное значение Y на графике для конкретной переоценки
+        min_value_sale_reprice = min(list(need_to_view_df_reprice['clean_count_sale']),
+                                     key=lambda x: abs(
+                                         x))  # минимальное значение Y на графике для конкретной переоценки
+        max_value_sale = max(list(need_to_view_df['clean_count_sale']),
+                             key=lambda x: abs(x))  # максимальное значение Y на графике для товара
+        min_value_sale = min(list(need_to_view_df['clean_count_sale']),
+                             key=lambda x: abs(x))  # минимальное значение Y на графике для товара
+
+        # Сама вертикальная линия
+        sales_fig.add_shape(
+            type="line",
+            x0=reprice_date,
+            y0=min_value_sale,
+            x1=reprice_date,
+            y1=max_value_sale_reprice,
+            line=dict(
+                dash="dash",
+                color = theme_colors['danger']
+            ),
+            opacity=1,
+            legendgroup=str(reprice_date),
+            name='Переоценка: '
+                 + '<br>'
+                 + str(reprice_date),
+            showlegend=False
+        )
+
+        # Подсказка (текст над вертикальной линией  - "переоценка: .."
+        sales_fig.add_annotation(
+            x=reprice_date,
+            y=max_value_sale_reprice,
+            text='Переоценка: ' +
+                 '<br>' +
+                 f'{reprice_date}',
+            opacity=1,
+            font= dict(
+                color = theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            ),
+            arrowcolor= theme_colors['danger']
+        )
+
+        # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
+        sales_fig.add_annotation(
+            x=reprice_date - pd.to_timedelta(1, unit='D'),
+            xanchor='right',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена до: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["last_price"].unique()[0])}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какая цена была после (справа от вертикальной линии на 1 день, выравнивание по левому краю)
+        sales_fig.add_annotation(
+            x=reprice_date + pd.to_timedelta(1, unit='D'),
+            xanchor='left',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена после: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["current_price"].unique()[0])}',
+            showarrow=False,
+            arrowcolor='#FFFFFF',
+            opacity=1,
+            bordercolor=border_color,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какой КПРОД у переоценки
+        sales_fig.add_annotation(
+            x=reprice_date,
+            y=offset_top,
+            yref='paper',
+            text='КПРОД = ' +
+                 f'{round(need_to_view_df_reprice["koef_change_sale"].unique()[0], 2)}',
+            showarrow=False,
+            arrowcolor='#FFFFFF',
+            opacity=1,
+            bordercolor=border_color,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=2,
+        )
+
+        revenue_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                     y=need_to_view_df_reprice['fact_revenue_clean'],
+                                     name='Очищенный' + '<br>' + 'оборот',
+                                     mode='lines+markers',
+                                     hovertemplate='<b>Сумма: %{y}' +
+                                                   '<br>Дата: %{x}',
+                                     text='Код товара: ' + need_to_view_df_reprice['product_code'],
+                                     opacity=0.5,
+                                     line = dict(color = theme_colors['info']),
+                                     showlegend= i == 0)
+        rolling_revenue_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                     y=need_to_view_df_reprice['fact_revenue_clean_mean'],
+                                     name='Очищенный' + '<br>' + 'оборот' + '<br>' + 'скл. ср.',
+                                     mode='lines+markers',
+                                     hovertemplate='<b>Сумма: %{y}' +
+                                                   '<br>Дата: %{x}',
+                                     text='Код товара: ' + need_to_view_df_reprice['product_code'],
+                                     opacity=1,
+                                     line=dict(color=theme_colors['success']),
+                                     showlegend=i == 0)
+
+        revenue_fig.add_trace(revenue_scatter)
+        revenue_fig.add_trace(rolling_revenue_scatter)
+        # revenue_fig.update_layout(hoverlabel_font={'size': 16},
+        #                           font_size=20)
+        max_value_revenue_reprice = max(list(need_to_view_df_reprice['fact_revenue_clean']),
+                                        key=lambda x: abs(
+                                            x))  # максимальное значение Y на графике для конкретной переоценки
+        min_value_revenue_reprice = min(list(need_to_view_df_reprice['fact_revenue_clean']),
+                                        key=lambda x: abs(
+                                            x))  # минимальное значение Y на графике для конкретной переоценки
+        max_value_revenue = max(list(need_to_view_df['fact_revenue_clean']),
+                                key=lambda x: abs(x))  # максимальное значение Y на графике для товара
+        min_value_revenue = min(list(need_to_view_df['fact_revenue_clean']),
+                                key=lambda x: abs(x))  # минимальное значение Y на графике для товара
+
+        revenue_fig.add_shape(
+            type="line",
+            x0=reprice_date,
+            y0=min_value_revenue,
+            x1=reprice_date,
+            y1=max_value_revenue_reprice,
+            line=dict(
+                dash="dash",
+                color = theme_colors['danger']
+            ),
+            opacity=1,
+            legendgroup=str(reprice_date),
+            name='Переоценка: ' +
+                 str(reprice_date),
+            showlegend=False
+        )
+
+        # Подсказка, вертикальная линия
+        revenue_fig.add_annotation(
+            x=reprice_date,
+            y=max_value_revenue_reprice,
+            text='Переоценка: ' +
+                 '<br>' +
+                 f'{reprice_date}',
+            opacity=1,
+            font=dict(
+                color=theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            )
+        )
+
+        # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
+        revenue_fig.add_annotation(
+            x=reprice_date - pd.to_timedelta(1, unit='D'),
+            xanchor='right',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена до: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["last_price"].unique()[0])}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какая цена была после (справа от вертикальной линии на 1 день, выравнивание по левому краю)
+        revenue_fig.add_annotation(
+            x=reprice_date + pd.to_timedelta(1, unit='D'),
+            xanchor='left',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена после: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["current_price"].unique()[0])}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какой КОБ у переоценки
+        revenue_fig.add_annotation(
+            x=reprice_date,
+            y=offset_top,
+            yref='paper',
+            text='КОБ = ' +
+                 f'{round(need_to_view_df_reprice["koef_change_revenue"].unique()[0], 2)}',
+            showarrow=False,
+            arrowcolor='#FFFFFF',
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        max_value_profit_reprice = max(
+            list(need_to_view_df_reprice['fact_profit_clean']),
+            key=lambda x: abs(x))  # максимальное значение Y на графике для конкретной переоценки
+        min_value_profit_reprice = min(
+            list(need_to_view_df_reprice['fact_profit_clean']),
+            key=lambda x: abs(x))  # минимальное значение Y на графике для конкретной переоценки
+        max_value_profit = max(list(need_to_view_df_reprice['fact_profit_clean']),
+                               key=lambda x: abs(x))  # максимальное значение Y на графике для товара
+        min_value_profit = min(list(need_to_view_df_reprice['fact_profit_clean']),
+                               key=lambda x: x + abs(x) * 10)  # минимальное значение Y на графике для товара
+
+
+
+        profit_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                    y=need_to_view_df_reprice['fact_profit_clean'],
+                                    # Оборот без НДС - Сумма без НДС
+                                    name='Очищенная' + '<br>' + 'прибыль',
+                                    mode='lines+markers',
+                                    hovertemplate='<b>Сумма: %{y}' +
+                                                  '<br>Дата: %{x}',
+                                    text='Код товара: ' + need_to_view_df_reprice['product_code'],
+                                    opacity=0.5,
+                                    line = dict(color = theme_colors['danger']),
+                                    showlegend= i ==0)
+        rolling_profit_scatter = go.Scatter(x=need_to_view_df_reprice['date'].dt.date,
+                                    y=need_to_view_df_reprice['fact_profit_clean_mean'],
+                                    # Оборот без НДС - Сумма без НДС
+                                    name='Очищенная' + '<br>' + 'прибыль' + '<br>' + 'скл. ср.',
+                                    mode='lines+markers',
+                                    hovertemplate='<b>Сумма: %{y}' +
+                                                  '<br>Дата: %{x}',
+                                    text='Код товара: ' + need_to_view_df_reprice['product_code'],
+                                    opacity=1,
+                                    line = dict(color = theme_colors['success']),
+                                    showlegend= i ==0)
+
+        profit_fig.add_trace(profit_scatter)
+        profit_fig.add_trace(rolling_profit_scatter)
+
+        profit_fig.add_shape(
+            type="line",
+            x0=reprice_date,
+            y0=min_value_profit,
+            x1=reprice_date,
+            y1=max_value_profit_reprice,
+            line=dict(
+                dash="dash",
+                color = theme_colors['danger']
+            ),
+            opacity=1,
+            legendgroup=str(reprice_date),
+            name='Переоценка: ' +
+                 '<br>' +
+                 str(reprice_date),
+            showlegend=False
+        )
+
+        profit_fig.add_annotation(
+            x=reprice_date,
+            y=max_value_profit_reprice,
+            ay=max_value_profit_reprice * 1.25,
+            ayref='y',
+            text='Переоценка: '
+                 + '<br>'
+                 + f'{reprice_date}',
+            opacity=1,
+            font=dict(
+                color=theme_colors['danger'],
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices - 1]
+            )
+        )
+
+        # Подсказка, какая цена была до (слева от вертикальной линии на 1 день, выравнивание по правому краю)
+        profit_fig.add_annotation(
+            x=reprice_date - pd.to_timedelta(1, unit='D'),
+            xanchor='right',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена до: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["last_price"].unique()[0])}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какая цена была после (справа от вертикальной линии на 1 день, выравнивание по левому краю)
+        profit_fig.add_annotation(
+            x=reprice_date + pd.to_timedelta(1, unit='D'),
+            xanchor='left',
+            y=-0.09,
+            yref='paper',
+            yanchor='top',
+            text='Цена после: ' +
+                 '<br>' +
+                 f'{int(need_to_view_df_reprice["current_price"].unique()[0])}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        # Подсказка, какой КПРИБ у переоценки
+        profit_fig.add_annotation(
+            x=reprice_date,
+            y=offset_top,
+            yref='paper',
+            text='КПРИБ = ' +
+                 f'{round(need_to_view_df_reprice["koef_change_profit"].unique()[0], 2)}',
+            showarrow=False,
+            bordercolor=border_color,
+            opacity=1,
+            font=dict(
+                family=font_style_annotations,
+                size=list_of_fontsizes[count_reprices-1],
+                color=color_text_annotations
+            ),
+            bgcolor=bgcolor,
+            borderwidth=2,
+            borderpad=4,
+        )
+
+        koeff_var_sales = go.Bar(x=pd.Series(reprice_date),
+                                 y=need_to_view_df_reprice['koef_var_sale'],
+                                 name='Коэфф. вар. продаж',
+                                 hovertemplate='<b>Значение: %{y}' +
+                                               '<br>Переоценка: %{x}',
+                                 opacity=1,
+                                 showlegend=i == 0,
+                                 marker_color=theme_colors['success'])
+        koeff_var_profit = go.Bar(x=pd.Series(reprice_date),
+                                  y=need_to_view_df_reprice['koef_var_profit'],
+                                  name='Коэфф. вар. прибыли',
+                                  hovertemplate='<b>Значение: %{y}' +
+                                                '<br>Переоценка: %{x}',
+                                  opacity=1,
+                                  showlegend=i == 0,
+                                  marker_color=theme_colors['danger'])
+        koeff_var_revenue = go.Bar(x=pd.Series(reprice_date),
+                                   y=need_to_view_df_reprice['koef_var_revenue'],
+                                   name='Коэфф. вар. оборота',
+                                   hovertemplate='<b>Значение: %{y}' +
+                                                 '<br>Переоценка: %{x}',
+                                   opacity=1,
+                                   showlegend=i == 0,
+                                   marker_color=theme_colors['info']
+                                   )
+        koeffs_var_fig.add_trace(koeff_var_sales)
+        koeffs_var_fig.add_trace(koeff_var_profit)
+        koeffs_var_fig.add_trace(koeff_var_revenue)
+        koeffs_var_fig.update_layout(barmode = 'stack')
+
+    # sales_fig.update_traces(line = dict(color = '#56CC9D'))
+
+
+    # формируем список из графиков, который затем преобразуется в список dbc.Элементов. Этот список "воткнется" в html.Div(children = "сюда")
+    list_of_figs = [('График изменения продаж с новой метрикой и скользящим средним (окно = 3)', sales_fig),
+                    # ('График изменения остатка', stock_fig),
+                    ('График изменения прибыли с новой метрикой и скользящим средним (окно = 3)', profit_fig),
+                    ('График изменения оборота с новой метрикой и скользящим средним (окно = 3)', revenue_fig),
+                    ('График изменения коэффициентов вариации с новой метрикой и скользящим средним (окно = 3)', koeffs_var_fig)]
     list_of_graphs = []
 
     for name, fig in list_of_figs:
@@ -1257,12 +2149,15 @@ def draw_figures(df):
     Output('h3-chosed-product', 'children'),
     Output('h1-chose', 'children'),
     Output('graphs', 'children', allow_duplicate=True),
+    Output('graphs-new', 'children'),
     Input('product-list', 'value'),
     prevent_initial_call=True
 )
 def update_of_pick_product(picked_code):
     sales_data.picked_product = picked_code
     need_to_view_df = sales_data.filtered_df(sales_data.main_df, who_called=update_of_pick_product.__name__)
+    need_to_view_df_new = sales_data.filtered_df(sales_data.k_metrics_new, who_called=update_of_pick_product.__name__)
+    t_test_df = sales_data.t_test_results_df.merge(need_to_view_df, on = ['current_price_date', 'product_code'], how = 'inner').drop_duplicates()
 
     if picked_code is None:
         h1_string = 'Выберете товар'
@@ -1277,34 +2172,49 @@ def update_of_pick_product(picked_code):
         )
         returned_object_clipboard = []
         list_of_graphs = []
+        list_of_graphs_new = []
         reprices_choiser = [
         ]
     else:
         h1_string = 'Выбрано:'
-        h3_string = str(need_to_view_df["Наименование"].iloc[0])
+        h3_string = str(need_to_view_df["Наименование"].iloc[0]) if len(str(need_to_view_df["Наименование"].iloc[0])) <=39 else str(need_to_view_df["Наименование"].iloc[0])[0:40] + '...'
         h5_string = 'Код товара: ' + str(need_to_view_df["product_code"].iloc[0])
-
-        table_df_from_need = need_to_view_df[['current_price_date',
-                                              'last_price_date',
-                                              'koef_change_sale',
-                                              'koef_change_revenue',
-                                              'koef_change_profit',
-                                              'current_price',
-                                              'last_price',
-                                              'delta_price']]
+        table_df_from_need = t_test_df[['current_price_date',
+                                        'last_price_date',
+                                        'koef_change_sale',
+                                        'koef_change_revenue',
+                                        'koef_change_profit',
+                                        'current_price',
+                                        'last_price',
+                                        'delta_price',
+                                        'tt_string_conclusion_sales',
+                                        'tt_string_conclusion_profit',
+                                        'tt_string_conclusion_revenue',
+                                        'norm_usage_sales',
+                                        'norm_usage_profit',
+                                        'norm_usage_revenue']]
         table_df_from_need.drop_duplicates(inplace=True)
         table_df = pd.DataFrame(
             {
-                'Переоценка ФЦ ОРП': table_df_from_need['current_price_date'].dt.date,
-                'Выставленная цена': table_df_from_need['current_price'],
-                'Предыдущая переоценка ФЦ ОРП': table_df_from_need['last_price_date'].dt.date,
-                'Предыдущая выставленная цена': table_df_from_need['last_price'],
-                'Изменение цены': table_df_from_need['delta_price'],
-                'КПРОД': table_df_from_need['koef_change_sale'],
-                'КПРИБ': table_df_from_need['koef_change_profit'],
-                'КОБ': table_df_from_need['koef_change_revenue']
-            }
+                ('Переоценка', 'Переоценка ФЦ ОРП'): table_df_from_need['current_price_date'].dt.date,
+                ('Переоценка', 'Выставленная цена'): table_df_from_need['current_price'],
+                ('Переоценка', 'Предыдущая переоценка ФЦ ОРП'): table_df_from_need['last_price_date'].dt.date,
+                ('Переоценка', 'Предыдущая выставленная цена'): table_df_from_need['last_price'],
+                ('Переоценка', 'Изменение цены'): table_df_from_need['delta_price'],
+                ('Старая метрика','КПРОД'): table_df_from_need['koef_change_sale'],
+                ('Старая метрика','КПРИБ'): table_df_from_need['koef_change_profit'],
+                ('Старая метрика','КОБ'): table_df_from_need['koef_change_revenue'],
+                ('Т-тест', 'Вывод из продаж'): table_df_from_need['tt_string_conclusion_sales'],
+                ('Т-тест', 'Вывод из прибыли'): table_df_from_need['tt_string_conclusion_profit'],
+                ('Т-тест', 'Вывод из оборота'): table_df_from_need['tt_string_conclusion_revenue'],
+                ('Т-тест', 'Распределение продаж'): table_df_from_need['norm_usage_sales'].apply(func = lambda x: ['Не нормальное', 'Нормальное'][x]),
+                ('Т-тест', 'Распределение прибыль'): table_df_from_need['norm_usage_profit'].apply(func = lambda x: ['Не нормальное', 'Нормальное'][x]),
+                ('Т-тест', 'Распределение оборота'): table_df_from_need['norm_usage_revenue'].apply(func = lambda x: ['Не нормальное', 'Нормальное'][x])
+            },
+            index=None
         )
+
+        table_df.index.set_names('', inplace = True)
         # возвращаем объект dbc, который "воткнется" в html.div, с указанным id
         returned_object_clipboard = [
             dbc.Row(
@@ -1357,13 +2267,58 @@ def update_of_pick_product(picked_code):
                 ]
             )
         ]
-        need_table = dbc.Table.from_dataframe(table_df, striped=True, bordered=True, hover=True)
+        # need_table = dbc.Table(
+        #     [
+        #         html.Thead(
+        #             html.Tr(
+        #                 [
+        #                     html.Th('Переоценка', colSpan='5'),
+        #                     html.Th('Старая метрика', colSpan='3'),
+        #                     html.Th('Новая метрика', colSpan='3'),
+        #                     html.Th('Т-тест', colSpan='6')
+        #                 ]
+        #             )
+        #         ),
+        #         html.Thead(
+        #             html.Tr(
+        #                 [
+        #                     html.Th('Дата', rowSpan='2'),
+        #                     html.Th('Цена', rowSpan='2'),
+        #                     html.Th('Предыдущая дата', rowSpan='2'),
+        #                     html.Th('Предыдущая цена', rowSpan='2'),
+        #                     html.Th('Изменение цены', rowSpan='2'),
+        #                     html.Th('КПРОД', rowSpan='2'),
+        #                     html.Th('КПРИБ', rowSpan='2'),
+        #                     html.Th('КОБ', rowSpan='2'),
+        #                     html.Th('Продажи в шт.', colSpan='2'),
+        #                     html.Th('Прибыль', colSpan = '2'),
+        #                     html.Th('Оборот', colSpan = '2')
+        #                 ]
+        #             )
+        #         ),
+        #         html.Thead(
+        #             html.Tr(
+        #                 [
+        #                     html.Td('Нормальность'),
+        #                     html.Td('Вывод'),
+        #                     html.Td('Нормальность'),
+        #                     html.Td('Вывод'),
+        #                     html.Td('Нормальность'),
+        #                     html.Td('Вывод')
+        #                 ]
+        #             )
+        #         )
+        #     ]
+        # )
+
+        need_table = dbc.Table.from_dataframe(table_df, striped=True, bordered=True, hover=True, index=True)
         list_of_graphs = draw_figures(need_to_view_df)
+        list_of_graphs_new = draw_figures_new(need_to_view_df_new)
 
         reprices_choiser = [
             dbc.Card(
                 [
-                    html.H2(children='Выбранные переоценки: ', style={'margin-left': 20, 'margin-top': 20}),
+                    html.H6(children='Выбранные переоценки: ', style={'margin-left': 20, 'margin-top': 20}),
                     dbc.Col(
                         [
                             dbc.Checklist(
@@ -1396,7 +2351,7 @@ def update_of_pick_product(picked_code):
         ]
         #     )
 
-    return reprices_choiser, need_table, returned_object_clipboard, h3_string, h1_string, list_of_graphs
+    return reprices_choiser, need_table, returned_object_clipboard, h3_string, h1_string, list_of_graphs, list_of_graphs_new
 
 
 @callback(
@@ -1424,7 +2379,6 @@ def update_koefs(*args):
     return_string = 'Количество товаров, подходящих под условие отбора: ' + counter
 
     need_to_view_df = sales_data.filtered_df(sales_data.main_df, who_called=update_koefs.__name__)
-    # print(need_to_view_df.columns)
     return draw_figures(need_to_view_df), return_string, sales_data.get_list_products()['product_code'].unique()
 
 
@@ -1452,34 +2406,81 @@ def copy_code(_):
 
 @callback(
     Output('graphs', 'children', allow_duplicate=True),
+    Output('graphs-new', 'children', allow_duplicate=True),
     Input('reprices-choiser', 'value'),
     prevent_initial_call=True
 )
 def update_of_reprices(reprices):
     sales_data.filter_reprice(reprices)
     need_to_view_df = sales_data.filtered_df(sales_data.main_df, who_called=update_of_reprices.__name__)
+    need_to_view_df_new = sales_data.filtered_df(sales_data.k_metrics_new, who_called = update_of_reprices.__name__)
 
-    return draw_figures(need_to_view_df)
+    return draw_figures(need_to_view_df), draw_figures_new(need_to_view_df_new)
 
 
 @callback(
+    Output('t-test-graphs', 'children'),
+    Output('table-new-allocation', 'children'),
     Output('table-allocation', 'children'),
     Output('koeffs_hist', 'figure'),
+    Output('koeffs_new_hist', 'figure'),
     Input('refresh-allocation', 'n_clicks')
 )
 def update_allocation(*args):
-
+    params_of_interval = {
+        'min': -80,
+        'max': 128,
+        'step': 100,
+        'over_min': -np.inf,
+        'over_max': np.inf
+    }
     # обращаемся к модулю calculate_allocation_koeffs за получением таблицы с рапределением, таблицы с рассчитанными нулями, и информативной таблицей
-    koeff_counts, indicator_for_coeffs, table_reprices_koefs_df = calculate_allocation_koeffs(sales_data.koeffs_df,
-                                                                                              filters={('product_code', 'current_price_date'): sales_data.get_list_products()})  #тут важно указать поля, по которым соединяются данные
+    koeff_counts, indicator_for_coeffs, table_reprices_koefs_df = calculate_allocation_koeffs(sales_data.main_df,
+                                                                                              filters={('product_code','current_price_date'): sales_data.get_list_products()},
+                                                                                              params_of_interval=params_of_interval) #тут важно указать поля, по которым соединяются данные
 
-    table_koeffs = dbc.Table.from_dataframe(
+    table_koeffs_old = [
+        dbc.Table.from_dataframe(
         table_reprices_koefs_df, striped=True, bordered=True, hover=True, index=True,
-    )
+    ),
+        html.Div([f'Переоценки, у которых все три коэффициента равны нулю: ', html.H4(f'{indicator_for_coeffs["all_koeffs_nulls"].iloc[0]} или {round(indicator_for_coeffs["all_koeffs_nulls"].iloc[0]/indicator_for_coeffs["all_reprices_count"].iloc[0] *100,2)}%')])]
 
-    figure_to_return = draw_allocation(koeff_counts, indicator_for_coeffs)
+    figure_to_return_old = draw_allocation(koeff_counts, indicator_for_coeffs)
 
-    return table_koeffs, figure_to_return
+    params_of_interval = {
+        'min': -80,
+        'max': 128,
+        'step': 100,
+        'over_min': -np.inf,
+        'over_max': np.inf
+    }
+
+    koeff_counts, indicator_for_coeffs, table_reprices_koefs_df = calculate_allocation_koeffs(sales_data.k_metrics_new_df,
+                                                                                              filters={('product_code',
+                                                                                                        'current_price_date'): sales_data.get_list_products()},
+                                                                                              params_of_interval=params_of_interval)  # тут важно указать поля, по которым соединяются данные
+
+    table_koeffs_new = [
+        dbc.Table.from_dataframe(
+            table_reprices_koefs_df, striped=True, bordered=True, hover=True, index=True,
+        ),
+        html.Div([f'Переоценки, у которых все три коэффициента равны нулю: ', html.H4(
+            f'{indicator_for_coeffs["all_koeffs_nulls"].iloc[0]} или {round(indicator_for_coeffs["all_koeffs_nulls"].iloc[0] / indicator_for_coeffs["all_reprices_count"].iloc[0] * 100, 2)}%')])]
+
+    figure_to_return_new = draw_allocation(koeff_counts, indicator_for_coeffs)
+
+    dict_of_figs = calculate_sunburst(sales_data.t_test_results_df, sales_data.get_list_products().drop_duplicates())
+    list_of_graphs = []
+    for name, fig in dict_of_figs.items():
+        list_of_graphs.append(
+            dbc.Col(
+                dcc.Graph(figure=fig.update_layout(margin=dict(l=10, r=10, t=20, b=20), font = dict(size = 40)),
+                          className='dbc')
+            )
+        )
+
+
+    return list_of_graphs, table_koeffs_new, table_koeffs_old, figure_to_return_old, figure_to_return_new
 
 # CALLBACK для иерархии
 @callback(
@@ -1531,6 +2532,53 @@ def hierarchy_choiser(*args):
         sorted(list(to_return_dir), key = sort_hierarchy), \
         sorted(list(to_return_group), key = sort_hierarchy),\
         sorted(list(to_return_cat), key = sort_hierarchy)
+
+@callback(
+    Output('counter-product', 'children', allow_duplicate=True),
+    Output('product-list', 'options', allow_duplicate=True),
+    Input('brand-choice', 'value'),
+    prevent_initial_call = True
+)
+def update_product_with_brand(brands):
+    sales_data.filter_brand(brands)
+    counter = str(len(sales_data.get_list_products()['product_code'].unique()))
+    return_string = 'Количество товаров, подходящих под условие отбора: ' + counter
+
+
+    return return_string, sales_data.get_list_products()['product_code'].unique()
+
+
+# callback для слайдера (левое правое ограничение, единое решение, можно копипастить )
+@callback(
+    Output("range-price-left", "value"),
+    Output("range-price-right", "value"),
+    Output("range-slider-price", "value"),
+    Input("range-price-left", "value"),
+    Input("range-price-right", "value"),
+    Input("range-slider-price", "value"),
+)
+def update_slider_inputs(start, end, slider):
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    start_value = start if trigger_id == "range-price-left" else slider[0]
+    end_value = end if trigger_id == "range-price-right" else slider[1]
+    slider_value = slider if trigger_id == "range-slider-price" else [start_value, end_value]
+
+    return start_value, end_value, slider_value
+
+@callback(
+    Output('counter-product', 'children', allow_duplicate=True),
+    Output('product-list', 'options', allow_duplicate=True),
+    Input('range-slider-price', 'value'),
+    prevent_initial_call = True
+)
+def update_product_with_price(prices):
+    sales_data.filter_price(prices)
+    counter = str(len(sales_data.get_list_products()['product_code'].unique()))
+    return_string = 'Количество товаров, подходящих под условие отбора: ' + counter
+    return return_string, sales_data.get_list_products()['product_code'].unique()
+
 
 
 if __name__ == '__main__':

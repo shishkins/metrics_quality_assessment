@@ -2,24 +2,23 @@ import numpy as np
 import pandas as pd
 
 
-def calculate_allocation_koeffs(koeffs_df, filters):
+def calculate_allocation_koeffs(df, filters, params_of_interval):
     # Создаем pd.cut объект с интервалами
-    params_of_interval = {
-        'min': -80,
-        'max': 128,
-        'step': 100,
-        'over_min': -np.inf,
-        'over_max': np.inf
-    }
-
+    koeffs_df = df[
+        ['koef_change_sale',
+         'koef_change_revenue',
+         'koef_change_profit',
+         'current_price_date',
+         'product_code'
+        ]
+    ].drop_duplicates(subset=['product_code', 'current_price_date'])
 
     for column, filter in filters.items():
         koeffs_df = koeffs_df.merge(filter,
-                                    on=column)  # фильтруем датафрейм с коэффициентами по колонке, указанной при обращении к функции
+                                    on=column) # фильтруем датафрейм с коэффициентами по колонке, указанной при обращении к функции
+
+    koeffs_df.drop(columns = ['reprice_flag', 'product_id', 'class_product', 'current_price'], inplace=True)
     koeffs_df.drop_duplicates(inplace= True)
-    # sample = koeffs_df
-    # if sample.value_counts().sum() == 1215:
-    #     sample.to_csv('sample.csv')
 
     indicator_for_coeffs = pd.DataFrame(
         {
@@ -67,6 +66,14 @@ def calculate_allocation_koeffs(koeffs_df, filters):
             ],
             'all_reprices_count': [
                 koeffs_df.shape[0]
+            ],
+            'all_koeffs_nulls': [
+                koeffs_df.loc[
+                    (koeffs_df['koef_change_profit'] == 0)
+                    & (koeffs_df['koef_change_sale'] == 0)
+                    & (koeffs_df['koef_change_revenue'] == 0),
+                    'koef_change_profit'
+                ].count()
             ]
         }
     )
@@ -148,6 +155,10 @@ def calculate_allocation_koeffs(koeffs_df, filters):
     )
 
     table_reprices_koefs_df.index.set_names(
-        f"Всего переоценок: {indicator_for_coeffs['all_reprices_count'].iloc[0]}", inplace=True)
+        f"Всего переоценок: {indicator_for_coeffs['all_reprices_count'].iloc[0]}"
+            ,
+        inplace=True)
+
+
 
     return koeff_counts,indicator_for_coeffs,table_reprices_koefs_df

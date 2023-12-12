@@ -18,16 +18,44 @@ def get_data():
 
 
     ''' Преобразование типов данных, настраивается пользователем '''
+    # выгружаем датафреймы из словаря
     sales_and_coeffs_df = dict_of_dataframes['sales_and_coeffs_df']
     hierarchy_df = dict_of_dataframes['hierarchy_df']
     write_date_df = dict_of_dataframes['write_date_df']
+    algorithms_reprices_df = dict_of_dataframes['algorithms_reprices_df']
+    assortment_status_products_df = dict_of_dataframes['assortment_status_products_df']
+
+
 
     # изменение типа данных
     sales_and_coeffs_df['current_price_date'] = pd.to_datetime(sales_and_coeffs_df['current_price_date'])
     sales_and_coeffs_df['last_price_date'] = pd.to_datetime(sales_and_coeffs_df['last_price_date'])
     sales_and_coeffs_df['sale_date'] = pd.to_datetime(sales_and_coeffs_df['sale_date'])
     sales_and_coeffs_df['product_code'] = sales_and_coeffs_df['product_code'].astype('str')
+    algorithms_reprices_df['current_price_date'] = pd.to_datetime(algorithms_reprices_df['current_price_date'])
+    assortment_status_products_df['product_code'] = assortment_status_products_df['product_code'].astype('str')
+
+    if os.path.isfile("csv/t_test_results.csv"):
+        t_test_results_df = dict_of_dataframes['t_test_results_df']
+
+        t_test_results_df['product_code'] = t_test_results_df['product_code'].astype('str')
+        t_test_results_df['current_price_date'] = pd.to_datetime(t_test_results_df['current_price_date'])
+
+        dict_of_dataframes['t_test_results_df'] = t_test_results_df
+
+    if os.path.isfile("csv/k_metrics_new.csv"):
+        k_metrics_new_df = dict_of_dataframes['k_metrics_new_df']
+        k_metrics_new_df['product_code'] = k_metrics_new_df['product_code'].astype('str')
+        k_metrics_new_df['date'] = pd.to_datetime(k_metrics_new_df['date'])
+        k_metrics_new_df['current_price_date'] = pd.to_datetime(k_metrics_new_df['current_price_date'])
+        k_metrics_new_df.rename(
+        columns={'kprod_new': 'koef_change_sale', 'kob_new': 'koef_change_revenue', 'kprib_new': 'koef_change_profit', 'k_var_sales': 'koef_var_sale','k_var_revenue':'koef_var_revenue','k_var_profit':'koef_var_profit'},
+        inplace=True)
+        dict_of_dataframes['k_metrics_new'] = k_metrics_new_df
+
+
     write_date_df['write_date'] = pd.to_datetime(write_date_df['write_date'])
+
 
     # расчет некоторых величин
     koeffs_df = sales_and_coeffs_df[['koef_change_sale','koef_change_revenue','koef_change_profit', 'current_price_date', 'product_code']].drop_duplicates()
@@ -130,6 +158,9 @@ def get_data():
     dict_of_dataframes['koeff_counts'] = koeff_counts
     dict_of_dataframes['koeffs_df'] = koeffs_df
     dict_of_dataframes['indicators_for_coeffs'] = indicators_for_coeffs
+    dict_of_dataframes['assortment_status_products_df'] = assortment_status_products_df
+
+
 
 
     ''' Создание календаря '''
